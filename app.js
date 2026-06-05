@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.2";
+const APP_VERSION = "1.2.4";
 
 const App = (() => {
   "use strict";
@@ -75,11 +75,13 @@ const App = (() => {
   const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
   const escapeHtml = s => String(s==null?"":s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 
-  /* ----- GIỮ ĐỊNH DẠNG GẠCH NGANG (strikethrough) -------------------------
+  /* ----- GIỮ ĐỊNH DẠNG GẠCH NGANG (strikethrough) + XUỐNG DÒNG ------------
      Google Sheets cho biết gạch ngang theo 2 cách:
        1) effectiveFormat.textFormat.strikethrough = true  -> gạch cả ô
        2) textFormatRuns[] = các đoạn ký tự, mỗi đoạn có thể strikethrough
-     Hàm trả về HTML đã escape, phần gạch bọc trong <s>...</s>.            */
+     Ô có nhiều dòng (vd nhiều mã b...) -> giữ xuống dòng bằng <br>.
+     Hàm trả về HTML đã escape.                                             */
+  const escNL = s => escapeHtml(s).replace(/\r\n|\r|\n/g,"<br>"); // escape + giữ xuống dòng
   const richCellHtml = (cell) => {
     if(!cell) return "";
     const text = cell.formattedValue!=null ? String(cell.formattedValue) : "";
@@ -87,7 +89,7 @@ const App = (() => {
     const runs = cell.textFormatRuns;
     const wholeStrike = cell.effectiveFormat?.textFormat?.strikethrough===true;
     if(!runs || !runs.length){
-      return wholeStrike ? "<s>"+escapeHtml(text)+"</s>" : escapeHtml(text);
+      return wholeStrike ? "<s>"+escNL(text)+"</s>" : escNL(text);
     }
     // dựng theo runs: mỗi run bắt đầu tại startIndex (mặc định 0)
     let html="", segs=[];
@@ -99,7 +101,7 @@ const App = (() => {
     if(segs.length===0 || segs[0].start>0)
       segs.unshift({start:0,end:segs.length?segs[0].start:text.length,strike:wholeStrike});
     segs.forEach(s=>{
-      const part=escapeHtml(text.slice(s.start,s.end));
+      const part=escNL(text.slice(s.start,s.end));
       html += (s.strike? "<s>"+part+"</s>" : part);
     });
     return html;
@@ -107,6 +109,31 @@ const App = (() => {
 
   // giữ lại splitCodeText (không dùng để tách mã nữa, nhưng còn dùng nơi khác nếu cần)
   const splitCodeText = raw => ({codes:[String(raw||"").trim()].filter(Boolean), text:""});
+
+  /* ----- NHẬN DIỆN MÃ HỢP LỆ vs GHI CHÚ -----------------------------------
+     1 token là MÃ nếu khớp các dạng: b00..., SPXVN..., SPEVN..., SHOPEE...,
+     CX/CO/CN...VN, hoặc chuỗi chữ-HOA+số dài (vd 250723UUC77M84, G84NE7Q4).
+     Ô CHỈ gồm các mã (nhiều dòng cũng được) -> KHÔNG phải ghi chú.
+     Ô có token KHÔNG phải mã (chữ tiếng Việt: HỦY/ĐỔI..., số đt, URL) -> ghi chú. */
+  const isCodeToken = tok => {
+    const t = tok.trim();
+    if (t==="") return true;            // token rỗng (do nhiều khoảng trắng) -> bỏ qua
+    if (t.length < 5) return false;
+    if (/^b0\d{6,}$/i.test(t)) return true;                       // order id b00...
+    if (/^(spxvn|spevn|shopee|shopeevtp)\w+$/i.test(t)) return true; // mã vận shopee
+    if (/^[a-z]{2}\d{6,}vn$/i.test(t)) return true;               // CX/CO/CN...VN
+    if (/^[a-z0-9]{6,}$/i.test(t) && /\d/.test(t)) return true;   // mã hỗn hợp chữ-số (250..., G84...)
+    return false;
+  };
+  // true nếu ô CÓ ghi chú (ít nhất 1 token không phải mã)
+  const cellHasNote = raw => {
+    const v = String(raw||"").trim();
+    if (v==="") return false;
+    // tách theo xuống dòng, khoảng trắng, dấu phẩy, mũi tên --->
+    const toks = v.split(/[\n\r]+|\s{1,}|,|-{2,}|>+|=+/).map(s=>s.trim()).filter(Boolean);
+    if (!toks.length) return false;
+    return toks.some(t => !isCodeToken(t));
+  };
 
   return {
     /* =====================================================================
@@ -272,14 +299,12 @@ const App = (() => {
         ["orderId","maVan","sanPham"].forEach(k=>{ rec.html[k]=richHtml(ri,k); });
 
         // ---- YÊU CẦU 4: GIỮ FULL TEXT mã, KHÔNG tách. ----
-        // Nếu trong ô mã có chữ (không chỉ là mã thuần) -> đánh dấu để bạn ĐỌC & SỬA cả ô.
+        // Chỉ cảnh báo khi ô có TOKEN KHÔNG PHẢI MÃ (chữ ghi chú, sđt, URL...).
+        // Ô chỉ gồm nhiều mã b... (mỗi mã một dòng) -> KHÔNG cảnh báo.
         ["orderId","maVan"].forEach(k=>{
           const v=String(rec.raw[k]||"");
           rec[k]={full:v, html:rec.html[k]}; // full text giữ nguyên
-          // phát hiện ô có "chữ ghi chú": có chữ cái thường/dấu cách nhiều + không phải chỉ mã
-          const hasNote = /[a-zà-ỹ]/i.test(v) && /(hủy|huy|đổi|doi|chờ|cho|lỗi|loi|note|ghi chú|http|còn|con|chưa|chua|\s{2,})/i.test(v)
-            || /\n/.test(v);
-          if(hasNote && v.trim()!==""){
+          if(cellHasNote(v)){
             warnings.push({ri, field:k, fieldLabel:k==="orderId"?"Mã Order ID":"Mã Đơn Vận/Hàng",
               full:v, keep:v});  // keep = full text để bạn tự sửa
           }
@@ -993,7 +1018,17 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.2</b> — (bản hiện tại)
+<b>v1.2.4</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi ô mã <b>nhiều dòng bị nối thành 1 dòng</b> khi hiển thị/xuất:
+      giờ giữ đúng xuống dòng (mỗi mã một dòng) kèm gạch ngang.</li>
+</ul>
+<b>v1.2.3</b>
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi ô có <b>nhiều mã b...</b> (mỗi mã một dòng) bị nhầm là ghi chú.
+      Giờ chỉ cảnh báo khi ô có token KHÔNG phải mã (chữ HỦY/ĐỔI, số đt, URL...).</li>
+</ul>
+<b>v1.2.2</b>
 <ul style="margin:4px 0 10px">
   <li><b>Bỏ hết hàng trống thừa</b> ở cuối bảng: chỉ duyệt tới hàng dữ liệu thật
       cuối cùng; dải "ngắt ngày" chỉ giữ khi nằm GIỮA dữ liệu.</li>
