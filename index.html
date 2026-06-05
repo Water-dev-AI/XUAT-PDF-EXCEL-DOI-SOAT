@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Đối Soát Đơn Hàng & Theo Dõi Bán Hàng</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx-js-style/1.2.0/xlsx.bundle.js"></script>
 <style>
   :root{
     --ink:#1a2233; --ink-soft:#4a5568; --line:#d8dee9; --line-soft:#eceff4;
@@ -150,6 +150,16 @@
         <li>Google Sheet của bạn để chế độ <b>Bất kỳ ai có đường liên kết → Người xem</b>.</li>
       </ol>
     </details>
+
+    <div style="margin-top:16px;padding-top:16px;border-top:1px dashed var(--line)">
+      <label style="margin-bottom:8px">Hoặc mở lại file Excel đã xuất để xem/sửa</label>
+      <div id="dropZone" style="border:2px dashed var(--line);border-radius:10px;padding:18px;
+        text-align:center;color:var(--ink-soft);cursor:pointer;transition:.15s;font-size:13px">
+        📂 Kéo-thả hoặc bấm để chọn file <code>.xlsx</code> đã xuất trước đó
+        <input type="file" id="xlsxInput" accept=".xlsx" style="display:none">
+      </div>
+      <div class="hint">Dùng khi bạn muốn mở lại bản đã làm để chỉnh, không cần đọc lại Google Sheet.</div>
+    </div>
   </div>
 
   <!-- STEP 2: REVIEW + PREVIEW -->
