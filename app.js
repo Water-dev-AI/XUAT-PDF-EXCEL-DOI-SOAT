@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.1";
+const APP_VERSION = "1.2.2";
 
 const App = (() => {
   "use strict";
@@ -242,13 +242,24 @@ const App = (() => {
       // html giữ gạch ngang cho 1 cột
       const richHtml=(ri,key)=>richCellHtml(getGridCell(ri,key));
 
-      // data bắt đầu sau header (hàng 3 trở đi = index 2). Hàng 0 = tổng, hàng 1 = tiêu đề.
-      for(let ri=2; ri<rows.length; ri++){
-        const rowArr=rows[ri]||[];
-        const rowEmpty = rowArr.every(isBlank);
+      // "hàng có dữ liệu thật" = có ít nhất 1 trong các cột CỐT LÕI
+      // (ngày order, ngày DV, mã order, mã vận, tên SP, số lượng, đơn giá).
+      const coreKeys=["ngayOrder","ngayDV","orderId","maVan","sanPham","soLuong","donGiaGiam","donGiaChuaVat"];
+      const hasRealData = ri => coreKeys.some(k=>{const c=colMap[k];return c!=null && !isBlank(rows[ri]?.[c]);});
+
+      // tìm hàng dữ liệu thật CUỐI CÙNG -> bỏ mọi hàng trống phía sau
+      let lastDataRow = 1; // header ở index 1
+      for(let ri=2; ri<rows.length; ri++){ if(hasRealData(ri)) lastDataRow=ri; }
+
+      // data bắt đầu sau header (index 2). Hàng 0 = tổng, hàng 1 = tiêu đề.
+      // CHỈ duyệt tới lastDataRow -> không sinh hàng trống thừa ở cuối.
+      for(let ri=2; ri<=lastDataRow; ri++){
+        const rowEmpty = !hasRealData(ri);
 
         if(rowEmpty){
-          if(isGreenRow(ri) || out.length && out[out.length-1].type!=="daybreak")
+          // daybreak chỉ có nghĩa khi nằm GIỮA dữ liệu (đã có data ở trên, và còn data ở dưới
+          // — đảm bảo bởi vòng lặp dừng ở lastDataRow). Không thêm 2 daybreak liền nhau.
+          if(out.length && out[out.length-1].type==="row")
             out.push({type:"daybreak", ri});
           continue;
         }
@@ -330,6 +341,10 @@ const App = (() => {
 
         out.push(rec);
       }
+
+      // dọn daybreak thừa ở đầu & cuối (phòng trường hợp biên)
+      while(out.length && out[0].type==="daybreak") out.shift();
+      while(out.length && out[out.length-1].type==="daybreak") out.pop();
 
       // ---- SHOPEE: gộp orderId theo block merge của maVan ----
       // Trong block merge maVan, các ô orderId con có thể trống -> dồn FULL TEXT về anchor.
@@ -941,7 +956,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
           }
           continue;
         }
-        if(allEmpty){rows.push({type:"daybreak",ri:r});continue;}
+        if(allEmpty){
+          if(rows.length && rows[rows.length-1].type==="row") rows.push({type:"daybreak",ri:r});
+          continue;
+        }
         const g=k=>{const i=ci[k];return (i==null||i<0)?"":(row[i]??"");};
         const oid=String(g("orderId")), mv=String(g("maVan")), sp=String(g("sanPham"));
         const rec={type:"row",ri:r,raw:{
@@ -957,6 +975,9 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         stt++; rec.stt=ci.stt>=0&&g("stt")!==""?num(g("stt")):stt; rec.sttRowSpan=mergeRows[r]||1;
         rows.push(rec);
       }
+      // dọn daybreak thừa đầu/cuối
+      while(rows.length && rows[0].type==="daybreak") rows.shift();
+      while(rows.length && rows[rows.length-1].type==="daybreak") rows.pop();
       const sh={title:name,kind,isZalo,month,rows,warnings:[],emptyDates:[],cancelMismatch:[],
         missingChuaVat:false,colMap:{}};
       (byMonth[month]=byMonth[month]||[]).push(sh);
@@ -972,7 +993,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.1</b> — (bản hiện tại)
+<b>v1.2.2</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li><b>Bỏ hết hàng trống thừa</b> ở cuối bảng: chỉ duyệt tới hàng dữ liệu thật
+      cuối cùng; dải "ngắt ngày" chỉ giữ khi nằm GIỮA dữ liệu.</li>
+</ul>
+<b>v1.2.1</b>
 <ul style="margin:4px 0 10px">
   <li>Thêm <b>favicon SIMGLOBE</b> trên thanh địa chỉ / tab trình duyệt.</li>
   <li>Đổi tiêu đề tab thành "SIMGLOBE v… · Đối Soát Đơn Hàng".</li>
