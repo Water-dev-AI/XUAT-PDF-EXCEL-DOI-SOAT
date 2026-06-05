@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Đối Soát Đơn Hàng & Theo Dõi Bán Hàng</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --ink:#1a2233; --ink-soft:#4a5568; --line:#d8dee9; --line-soft:#eceff4;
+    --bg:#f4f6fa; --paper:#ffffff; --brand:#1f6feb; --brand-d:#1a5cc4;
+    --ok:#1f9d57; --warn:#c77400; --danger:#c0392b;
+    --day-break:#cfe8d8; --vat-row:#fff7e6; --cancel:#fdecea;
+    --shadow:0 1px 3px rgba(20,30,55,.08),0 6px 24px rgba(20,30,55,.06);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.45;font-size:14px}
+  header.app{background:linear-gradient(110deg,#10243f,#1f3b66);color:#fff;
+    padding:18px 26px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  header.app h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+  header.app .sub{font-size:12px;opacity:.78;margin-top:2px}
+  .wrap{max-width:1500px;margin:0 auto;padding:22px}
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:12px;
+    box-shadow:var(--shadow);padding:20px;margin-bottom:20px}
+  .card h2{font-size:15px;margin:0 0 14px;font-weight:650;display:flex;align-items:center;gap:8px}
+  .step-num{display:inline-flex;align-items:center;justify-content:center;
+    width:22px;height:22px;border-radius:50%;background:var(--brand);color:#fff;font-size:12px;font-weight:700}
+  label{font-size:12.5px;font-weight:600;color:var(--ink-soft);display:block;margin-bottom:5px}
+  input[type=text],input[type=password]{width:100%;padding:10px 12px;border:1px solid var(--line);
+    border-radius:8px;font-size:13.5px;font-family:inherit}
+  input:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px rgba(31,111,235,.12)}
+  .row{display:flex;gap:14px;flex-wrap:wrap}
+  .row>div{flex:1;min-width:240px}
+  button{font-family:inherit;font-size:13.5px;font-weight:600;border:none;border-radius:8px;
+    padding:10px 18px;cursor:pointer;transition:.15s}
+  .btn-primary{background:var(--brand);color:#fff}
+  .btn-primary:hover{background:var(--brand-d)}
+  .btn-ghost{background:#eef2f8;color:var(--ink)}
+  .btn-ghost:hover{background:#e2e8f2}
+  .btn-ok{background:var(--ok);color:#fff}
+  .btn-ok:hover{filter:brightness(.94)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .hint{font-size:12px;color:var(--ink-soft);margin-top:6px}
+  .hint code{background:#eef2f8;padding:1px 5px;border-radius:4px;font-size:11.5px}
+  details.help{margin-top:10px;font-size:12.5px;background:#f8fafc;border:1px solid var(--line-soft);
+    border-radius:8px;padding:0 12px}
+  details.help summary{cursor:pointer;padding:10px 0;font-weight:600;color:var(--brand)}
+  details.help ol{margin:4px 0 12px;padding-left:20px;line-height:1.7}
+  .status{padding:10px 14px;border-radius:8px;font-size:13px;margin-top:12px;display:none}
+  .status.show{display:block}
+  .status.info{background:#e8f1fd;color:#1a5cc4}
+  .status.err{background:var(--cancel);color:var(--danger)}
+  .status.good{background:#e6f6ed;color:var(--ok)}
+  /* tabs */
+  .tabbar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px;border-bottom:2px solid var(--line);padding-bottom:0}
+  .tabbar button{background:none;border:none;border-bottom:3px solid transparent;border-radius:0;
+    padding:9px 14px;color:var(--ink-soft);font-weight:600;margin-bottom:-2px}
+  .tabbar button.active{color:var(--brand);border-bottom-color:var(--brand)}
+  .tabbar button .badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:6px;
+    background:var(--warn);color:#fff;border-radius:10px;font-size:11px;line-height:18px;text-align:center}
+  .month-block{display:none}
+  .month-block.active{display:block}
+  /* review panels */
+  .review{margin-bottom:18px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .review-head{padding:11px 15px;font-weight:650;font-size:13.5px;display:flex;align-items:center;
+    justify-content:space-between;cursor:pointer;user-select:none}
+  .review-head.warn-h{background:#fff4e0;color:var(--warn)}
+  .review-head.empty-h{background:#fdecec;color:var(--danger)}
+  .review-head.ok-h{background:#e6f6ed;color:var(--ok)}
+  .review-body{padding:0;max-height:1000px;overflow:hidden;transition:.2s}
+  .review.collapsed .review-body{max-height:0}
+  table.rv{width:100%;border-collapse:collapse;font-size:12.5px}
+  table.rv th,table.rv td{border-bottom:1px solid var(--line-soft);padding:8px 10px;text-align:left;vertical-align:top}
+  table.rv th{background:#f8fafc;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--ink-soft)}
+  table.rv td input{padding:5px 7px;font-size:12.5px}
+  .tag{display:inline-block;padding:1px 7px;border-radius:5px;font-size:11px;font-weight:600}
+  .tag.code{background:#e8f1fd;color:#1a5cc4;font-family:ui-monospace,monospace}
+  .tag.txt{background:#fdeedb;color:var(--warn);font-family:ui-monospace,monospace}
+  .muted{color:#94a0b4;font-style:italic}
+  /* preview table */
+  .preview-scroll{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:520px}
+  table.pv{border-collapse:collapse;font-size:11px;white-space:nowrap;min-width:100%}
+  table.pv th,table.pv td{border:1px solid #e2e7f0;padding:4px 7px;text-align:left}
+  table.pv thead th{position:sticky;top:0;background:#10243f;color:#fff;font-size:10.5px;z-index:2;
+    text-transform:uppercase;letter-spacing:.3px}
+  table.pv tr.daybreak td{background:var(--day-break);height:8px;padding:0}
+  table.pv tr.cancel td{background:var(--cancel)}
+  table.pv tr.vatinfo td{background:var(--vat-row);font-size:10px;color:#7a5200;font-style:italic}
+  table.pv td.num{text-align:right;font-variant-numeric:tabular-nums}
+  table.pv td.code{font-family:ui-monospace,monospace;font-size:10px}
+  .merged-cell{background:#f6f9ff}
+  .export-bar{position:sticky;bottom:0;background:rgba(255,255,255,.96);backdrop-filter:blur(4px);
+    border-top:1px solid var(--line);padding:14px 22px;display:flex;gap:12px;justify-content:flex-end;
+    flex-wrap:wrap;align-items:center}
+  .export-bar .grow{margin-right:auto;font-size:12.5px;color:var(--ink-soft)}
+  .pill{display:inline-flex;gap:6px;align-items:center;font-size:12px;padding:4px 10px;border-radius:20px;
+    background:#eef2f8;margin-right:6px}
+  .pill b{font-weight:700;color:var(--ink)}
+  .empty-state{text-align:center;padding:50px 20px;color:var(--ink-soft)}
+  .empty-state svg{opacity:.35;margin-bottom:14px}
+  .spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);
+    border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:-3px;margin-right:7px}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-soft);margin-top:10px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .sw{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.1)}
+</style>
+</head>
+<body>
+<header class="app">
+  <div style="font-size:26px">📊</div>
+  <div>
+    <h1>Đối Soát Đơn Hàng &amp; Theo Dõi Bán Hàng</h1>
+    <div class="sub">Đọc trực tiếp từ Google Sheet · Review trước khi xuất · PDF + Excel theo từng tháng</div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- STEP 1: NGUỒN DỮ LIỆU -->
+  <div class="card">
+    <h2><span class="step-num">1</span> Nguồn dữ liệu</h2>
+    <div class="row">
+      <div style="flex:2">
+        <label>Link Google Sheet</label>
+        <input type="text" id="sheetUrl" placeholder="Dán link Google Sheet vào đây...">
+      </div>
+      <div>
+        <label>Google API Key</label>
+        <input type="password" id="apiKey" placeholder="AIza...">
+      </div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn-primary" id="loadBtn" onclick="App.load()">Đọc dữ liệu</button>
+      <label style="display:inline-flex;align-items:center;gap:6px;font-weight:500;margin:0">
+        <input type="checkbox" id="remember" style="width:auto"> Ghi nhớ API key trên máy này
+      </label>
+    </div>
+    <div class="status" id="loadStatus"></div>
+
+    <details class="help">
+      <summary>Cách lấy Google API Key (miễn phí · làm 1 lần)</summary>
+      <ol>
+        <li>Vào <code>console.cloud.google.com</code> → đăng nhập Google.</li>
+        <li>Tạo Project mới (góc trên, cạnh logo) → đặt tên gì cũng được.</li>
+        <li>Menu trái → <b>APIs &amp; Services</b> → <b>Library</b> → tìm <b>Google Sheets API</b> → bấm <b>Enable</b>.</li>
+        <li>Menu trái → <b>Credentials</b> → <b>Create Credentials</b> → <b>API key</b>. Copy chuỗi <code>AIza...</code>.</li>
+        <li>(Khuyên dùng) Bấm vào key vừa tạo → <b>API restrictions</b> → chọn <b>Restrict key</b> → tick <b>Google Sheets API</b> → Save. Như vậy key chỉ đọc được Sheets, không dùng được việc khác.</li>
+        <li>Google Sheet của bạn để chế độ <b>Bất kỳ ai có đường liên kết → Người xem</b>.</li>
+      </ol>
+    </details>
+  </div>
+
+  <!-- STEP 2: REVIEW + PREVIEW -->
+  <div class="card" id="workCard" style="display:none">
+    <h2><span class="step-num">2</span> Kiểm tra &amp; chỉnh sửa trước khi xuất</h2>
+    <div class="tabbar" id="tabbar"></div>
+    <div id="monthContainer"></div>
+  </div>
+
+  <div class="card" id="emptyCard">
+    <div class="empty-state">
+      <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M3 3h18v18H3z"/><path d="M3 9h18M9 3v18"/>
+      </svg>
+      <div style="font-size:15px;font-weight:600;margin-bottom:4px">Chưa có dữ liệu</div>
+      <div>Dán link Google Sheet + API key ở trên rồi bấm <b>Đọc dữ liệu</b>.</div>
+    </div>
+  </div>
+
+</div>
+
+<!-- thanh xuất file dính đáy, ẩn ban đầu -->
+<div class="export-bar" id="exportBar" style="display:none">
+  <div class="grow" id="exportSummary"></div>
+  <button class="btn-ghost" onclick="App.exportExcel('current')">⬇ Excel (tháng đang xem)</button>
+  <button class="btn-ghost" onclick="App.exportPDF('current')">🖨 PDF (tháng đang xem)</button>
+  <button class="btn-ok" onclick="App.exportExcel('all')">⬇ Excel (tất cả)</button>
+  <button class="btn-ok" onclick="App.exportPDF('all')">🖨 PDF (tất cả)</button>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
