@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.2.1";
 
 const App = (() => {
   "use strict";
@@ -972,7 +972,14 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.0</b> — (bản hiện tại)
+<b>v1.2.1</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Thêm <b>favicon SIMGLOBE</b> trên thanh địa chỉ / tab trình duyệt.</li>
+  <li>Đổi tiêu đề tab thành "SIMGLOBE v… · Đối Soát Đơn Hàng".</li>
+  <li>Thêm <b>cache-busting</b> (<code>app.js?v=…</code>) để trình duyệt luôn tải bản mới,
+      tránh kẹt version cũ.</li>
+</ul>
+<b>v1.2.0</b>
 <ul style="margin:4px 0 10px">
   <li>Thêm <b>số phiên bản</b> hiển thị trên thanh tiêu đề + changelog này.</li>
   <li>Thêm <b>logo SIMGLOBE</b> trên header (nhúng sẵn, không cần file ngoài).</li>
