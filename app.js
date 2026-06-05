@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.4";
+const APP_VERSION = "1.2.6";
 
 const App = (() => {
   "use strict";
@@ -310,14 +310,15 @@ const App = (() => {
           }
         });
 
-        // merge info cho cột maVan (để xác định block gộp)
+        // merge info. Cột "neo merge": SHOPEE = maVan, ZALO = orderId (vì ZALO bỏ maVan).
         const mvCol=colMap["maVan"], oiCol=colMap["orderId"], odCol=colMap["ngayOrder"];
-        rec.mergeTopMaVan = mvCol!=null && mergeAnchor[ri+"_"+mvCol] ? mergeAnchor[ri+"_"+mvCol].rows : 1;
-        rec.isMergedSlave = mvCol!=null && !!mergedInto[ri+"_"+mvCol];
+        const anchorCol = (!isZalo && mvCol!=null) ? mvCol : oiCol;
+        rec.mergeTop = (anchorCol!=null && mergeAnchor[ri+"_"+anchorCol]) ? mergeAnchor[ri+"_"+anchorCol].rows : 1;
+        rec.isMergedSlave = anchorCol!=null && !!mergedInto[ri+"_"+anchorCol];
 
         // ngày order có nằm trong block merge không (thừa hưởng ngày phía trên)?
         rec.ngayOrderMerged = odCol!=null && !!mergedInto[ri+"_"+odCol];
-        const isContinuation = rec.ngayOrderMerged ||
+        const isContinuation = rec.ngayOrderMerged || rec.isMergedSlave ||
           (isBlank(rec.raw.orderId) && isBlank(rec.raw.maVan) && out.length &&
            out[out.length-1].type==="row");
 
@@ -371,27 +372,31 @@ const App = (() => {
       while(out.length && out[0].type==="daybreak") out.shift();
       while(out.length && out[out.length-1].type==="daybreak") out.pop();
 
-      // ---- SHOPEE: gộp orderId theo block merge của maVan ----
-      // Trong block merge maVan, các ô orderId con có thể trống -> dồn FULL TEXT về anchor.
-      if(!isZalo){
-        for(let i=0;i<out.length;i++){
-          const r=out[i]; if(r.type!=="row")continue;
-          if(r.mergeTopMaVan>1){
-            let span=1;
-            const oidParts=r.orderId.full?[r.orderId.full]:[];
-            const oidHtml=r.orderId.html?[r.orderId.html]:[];
-            for(let j=i+1;j<out.length && span<r.mergeTopMaVan;j++){
-              const c=out[j]; if(c.type==="daybreak")continue;
-              if(c.isMergedSlave){
-                if(c.orderId.full){oidParts.push(c.orderId.full);oidHtml.push(c.orderId.html);}
-                c.orderIdHiddenByMerge=true; span++;
-              } else break;
-            }
-            r.orderId.full=oidParts.join("\n");
-            r.orderId.html=oidHtml.filter(Boolean).join("<br>");
-            r.orderIdRowSpan=r.mergeTopMaVan;
-            r.maVanRowSpan=r.mergeTopMaVan;
+      // ---- GỘP merge cho CẢ SHOPEE & ZALO ----
+      // SHOPEE: ô maVan merge -> các orderId con (có thể trống) dồn về anchor.
+      // ZALO  : ô orderId merge -> đây là 1 ĐƠN nhiều SP -> hiển thị merge mã chung.
+      for(let i=0;i<out.length;i++){
+        const r=out[i]; if(r.type!=="row")continue;
+        if(r.mergeTop>1){
+          let span=1;
+          const oidParts=r.orderId.full?[r.orderId.full]:[];
+          const oidHtml=r.orderId.html?[r.orderId.html]:[];
+          const mvParts=r.maVan.full?[r.maVan.full]:[];
+          const mvHtml=r.maVan.html?[r.maVan.html]:[];
+          for(let j=i+1;j<out.length && span<r.mergeTop;j++){
+            const c=out[j]; if(c.type==="daybreak")continue;
+            if(c.isMergedSlave){
+              if(c.orderId.full){oidParts.push(c.orderId.full);oidHtml.push(c.orderId.html);}
+              if(c.maVan.full){mvParts.push(c.maVan.full);mvHtml.push(c.maVan.html);}
+              c.orderIdHiddenByMerge=true; span++;
+            } else break;
           }
+          r.orderId.full=oidParts.join("\n");
+          r.orderId.html=oidHtml.filter(Boolean).join("<br>");
+          r.maVan.full=mvParts.join("\n");
+          r.maVan.html=mvHtml.filter(Boolean).join("<br>");
+          r.orderIdRowSpan=span;   // số dòng thực sự gộp được
+          r.maVanRowSpan=span;
         }
       }
 
@@ -628,16 +633,19 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       }
       const tr=el("tr",r.isCancel?"cancel":"");
       cols.forEach(c=>{
-        // STT + cột mã có rowspan ở SHOPEE (gộp theo đơn)
-        if((c==="stt"||c==="orderId"||c==="maVan") && !sh.isZalo){
-          if(r.orderIdHiddenByMerge) return; // bị anchor span phủ
-          const td=el("td", c==="stt"?"num":"code merged-cell");
-          if(r.orderIdRowSpan) td.rowSpan=r.orderIdRowSpan;
+        const isMergeCol = (c==="stt"||c==="orderId"||c==="maVan");
+        // cột gộp theo đơn (STT, mã) — áp rowspan cho cả SHOPEE lẫn ZALO
+        if(isMergeCol && r.orderIdRowSpan>1){
+          if(r.orderIdHiddenByMerge) return; // dòng con: bị anchor span phủ
+          const td=el("td", c==="stt"?"num merged-cell":"code merged-cell");
+          td.rowSpan=r.orderIdRowSpan;
           if(c==="stt") td.textContent = r.stt==null?"":r.stt;
           else if(c==="orderId") td.innerHTML=r.orderId.html||"";
           else td.innerHTML=r.maVan.html||"";
           tr.appendChild(td);return;
         }
+        // dòng con của block (không merge ở đây vì anchor đã rowspan) -> bỏ ô mã/stt
+        if(isMergeCol && r.orderIdHiddenByMerge) return;
         const td=el("td");
         if(c==="stt"){td.className="num";td.textContent=r.stt==null?"":r.stt;tr.appendChild(td);return;}
         if(c==="orderId"){td.className="code";td.innerHTML=r.orderId.html||"";tr.appendChild(td);return;}
@@ -704,13 +712,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 
     sh.rows.forEach(r=>{
       if(r.type==="daybreak"){aoa.push(cols.map(()=> ""));htmlMx.push(cols.map(()=> ""));rowMeta.push("daybreak");return;}
-      const slave = r.orderIdHiddenByMerge && !sh.isZalo;
+      const slave = !!r.orderIdHiddenByMerge;  // dòng con của block merge (cả SHOPEE & ZALO)
       const line=cols.map(c=>cellVal(r,c,sh,slave));
       const lineH=cols.map(c=>cellHtml(r,c,sh,slave));
       aoa.push(line);htmlMx.push(lineH);rowMeta.push(r.isCancel?"cancel":"data");
 
-      // merge cho block anchor (SHOPEE): STT + orderId + maVan
-      if(!slave && r.orderIdRowSpan && r.orderIdRowSpan>1 && !sh.isZalo){
+      // merge cho block anchor (cả SHOPEE & ZALO): STT + orderId + maVan(nếu có)
+      if(!slave && r.orderIdRowSpan && r.orderIdRowSpan>1){
         const top=aoa.length-1;
         ["stt","orderId","maVan"].forEach(k=>{
           const ci=cols.indexOf(k);
@@ -859,7 +867,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         border-color:#0c1c33}
       td.num{text-align:right;font-variant-numeric:tabular-nums}
       td.stt{text-align:center}
-      td.code{font-family:"Consolas","Courier New",monospace;font-size:6.4pt;word-break:break-all}
+      td.code{font-size:6.8pt;word-break:break-word}
       s{color:#b00020}
       tr.daybreak td{background:#bfe3cc !important;height:3px;padding:0;
         -webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -1018,7 +1026,17 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.4</b> — (bản hiện tại)
+<b>v1.2.6</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>PDF: cột mã (b..., SPXVN...) <b>dùng cùng font</b> với các cột chữ khác
+      (bỏ font monospace nhìn xấu).</li>
+</ul>
+<b>v1.2.5</b>
+<ul style="margin:4px 0 10px">
+  <li>Sửa merge cho <b>bảng ZALO</b>: ô Mã Order ID merge nhiều hàng (1 đơn nhiều SP)
+      giờ giữ đúng dạng merge — không còn thành 1 ô có mã + 1 ô trống.</li>
+</ul>
+<b>v1.2.4</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi ô mã <b>nhiều dòng bị nối thành 1 dòng</b> khi hiển thị/xuất:
       giờ giữ đúng xuống dòng (mỗi mã một dòng) kèm gạch ngang.</li>
