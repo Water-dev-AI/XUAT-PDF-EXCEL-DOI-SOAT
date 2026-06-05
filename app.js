@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.6";
+const APP_VERSION = "1.2.7";
 
 const App = (() => {
   "use strict";
@@ -842,10 +842,16 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       const w=window.open("","_print_"+Date.now());
       if(!w){alert("Trình duyệt chặn cửa sổ in. Hãy cho phép pop-up cho trang này rồi thử lại.");return;}
       w.document.write(html);w.document.close();
-      w.onload=()=>{ setTimeout(()=>{ w.print();
-        // sau khi in xong (hoặc đóng), mở bảng kế tiếp
-        setTimeout(openNext, 800);
-      },300); };
+      // dọn widget do extension trình duyệt (Text-to-Speech...) tự chèn vào cửa sổ in
+      const cleanExt=()=>{ try{
+        w.document.querySelectorAll(
+          '.spoken-word,.spoken-word-playback-controls,[class*="spoken-word"],[id*="biread"]'
+        ).forEach(n=>n.remove());
+      }catch(e){} };
+      w.onload=()=>{ cleanExt();
+        setTimeout(()=>{ cleanExt(); w.print();
+          setTimeout(openNext, 800);
+        },350); };
     };
     openNext();
   };
@@ -876,6 +882,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         text-align:left;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       tr{page-break-inside:avoid}
       thead{display:table-header-group}
+      /* Ẩn widget "Text to Speech" / các tiện ích trình duyệt tự chèn vào trang in */
+      .spoken-word,.spoken-word-playback-controls,[class*="spoken-word"],
+      [id*="biread"],[class*="tts"],[data-tts]{display:none !important}
+      @media print{
+        .spoken-word,.spoken-word-playback-controls,[class*="spoken-word"],
+        [id*="biread"]{display:none !important}
+      }
     </style></head><body>`;
     html+=`<div class="doc-title">${esc(titleFor(mo))}</div>`;
     html+=`<div class="sheet-title">${esc(sh.title)} — ${sh.kind}</div>`;
@@ -1026,7 +1039,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.6</b> — (bản hiện tại)
+<b>v1.2.7</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Ẩn widget <b>"Text to Speech"</b> (do tiện ích trình duyệt tự chèn) trong
+      trang in PDF. Lưu ý: cách triệt để là tắt/gỡ tiện ích đó trên trình duyệt.</li>
+</ul>
+<b>v1.2.6</b>
 <ul style="margin:4px 0 10px">
   <li>PDF: cột mã (b..., SPXVN...) <b>dùng cùng font</b> với các cột chữ khác
       (bỏ font monospace nhìn xấu).</li>
