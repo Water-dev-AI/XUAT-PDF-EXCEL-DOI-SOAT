@@ -87,7 +87,7 @@
   /* preview table */
   .preview-scroll{overflow:auto;border:1px solid var(--line);border-radius:10px;max-height:520px}
   table.pv{border-collapse:collapse;font-size:11px;white-space:nowrap;min-width:100%}
-  table.pv th,table.pv td{border:1px solid #e2e7f0;padding:4px 7px;text-align:left}
+  table.pv th,table.pv td{border:1px solid #e2e7f0;padding:4px 7px;text-align:left;vertical-align:middle}
   table.pv thead th{position:sticky;top:0;background:#10243f;color:#fff;font-size:10.5px;z-index:2;
     text-transform:uppercase;letter-spacing:.3px}
   table.pv tr.daybreak td{background:var(--day-break);height:8px;padding:0}
@@ -199,7 +199,7 @@
   <button class="btn-ok" onclick="App.exportPDF('all','ZALO')">🖨 PDF ZALO (tất cả)</button>
 </div>
 
-<script src="app.js?v=1.3.0"></script>
+<script src="app.js?v=1.3.1"></script>
 <script>
   try{
     if(typeof APP_VERSION!=="undefined"){

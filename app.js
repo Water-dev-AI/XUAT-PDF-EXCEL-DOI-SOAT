@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.3.1";
 
 const App = (() => {
   "use strict";
@@ -824,7 +824,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
             } else {
               cell.t="s"; cell.v=(v==null?"":String(v));
             }
-            const st={border:BORDER,alignment:{vertical:"top",wrapText:true}};
+            const st={border:BORDER,alignment:{vertical:"center",wrapText:true}};
             if(m==="title"){st.font={bold:true,sz:13};st.alignment={horizontal:"center",vertical:"center"};delete st.border;}
             else if(m==="header"){st.font={bold:true,color:{rgb:"FFFFFF"},sz:9};
               st.fill={fgColor:{rgb:"10243F"}};st.alignment={horizontal:"center",vertical:"center",wrapText:true};}
@@ -896,10 +896,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       .doc-title{text-align:center;font-size:14pt;font-weight:bold;margin:0 0 4px}
       .sheet-title{text-align:center;font-size:10.5pt;font-weight:bold;margin:0 0 8px;color:#222}
       table{border-collapse:collapse;width:100%;table-layout:fixed}
-      th,td{border:0.6pt solid #333;padding:2px 3px;font-size:7pt;word-wrap:break-word;
-        overflow-wrap:break-word;vertical-align:top;line-height:1.2}
+      th,td{border:0.6pt solid #333;padding:3px 3px;font-size:7pt;word-wrap:break-word;
+        overflow-wrap:break-word;vertical-align:middle;line-height:1.2}
       th{background:#0c1c33 !important;color:#ffffff !important;font-size:6.9pt;font-weight:bold;
-        text-align:center;-webkit-print-color-adjust:exact;print-color-adjust:exact;
+        text-align:center;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact;
         border-color:#0c1c33}
       td.num{text-align:right;font-variant-numeric:tabular-nums}
       td.stt{text-align:center}
@@ -909,7 +909,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         -webkit-print-color-adjust:exact;print-color-adjust:exact}
       tr.cancel td{background:#fde0dd !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       tr.vatinfo td{background:#fff3da !important;font-size:6.2pt;font-style:italic;color:#5a4200;
-        text-align:left;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+        text-align:left;vertical-align:middle;-webkit-print-color-adjust:exact;print-color-adjust:exact}
       tr{page-break-inside:avoid}
       thead{display:table-header-group}
       /* Ẩn widget "Text to Speech" / các tiện ích trình duyệt tự chèn vào trang in */
@@ -1069,7 +1069,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.3.0</b> — (bản hiện tại)
+<b>v1.3.1</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Căn <b>giữa theo chiều dọc</b> cho text trong ô (PDF, Excel, xem trước) —
+      nhất là các ô merge (STT, ngày, mã) khi đơn có nhiều dòng.</li>
+</ul>
+<b>v1.3.0</b>
 <ul style="margin:4px 0 10px">
   <li>PDF: bỏ chữ <b>"SHOPEE"/"ZALO" bị lặp</b> ở phụ đề (đã có trong tên tab "T3 SHOPEE").</li>
   <li>Header cột "Đơn Giá Chưa VAT" gọn lại còn <b>2 dòng</b> (rút "trừ SIM trắng" → "trừ SIM").</li>
