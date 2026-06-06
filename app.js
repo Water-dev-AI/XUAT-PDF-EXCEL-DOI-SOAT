@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.3.3";
+const APP_VERSION = "1.4.0";
 
 const App = (() => {
   "use strict";
@@ -262,6 +262,7 @@ const App = (() => {
       const warnings=[];   // ô mã có chữ ghi chú (để bạn ĐỌC & SỬA full text)
       const emptyDates=[]; // ngày order trống -> review
       const cancelMismatch=[]; // mã có 'hủy' nhưng tên SP chưa có 'hủy'
+      const cancelQtyMismatch=[]; // có 'hủy' nhưng số lượng KHÔNG âm
       const getCell=(ri,key)=>{const c=colMap[key];return c==null?"":(rows[ri]?.[c]??"");};
       // lấy grid cell (để đọc định dạng gạch ngang)
       const getGridCell=(ri,key)=>{const c=colMap[key];if(c==null)return null;
@@ -363,6 +364,16 @@ const App = (() => {
         rec.donGiaChuaVat = dgChua;
         rec.isCancel = (rec.soLuong!=null && rec.soLuong<0);
 
+        // ---- PHÁT HIỆN: đơn HỦY (ở mã HOẶC tên SP) nhưng SỐ LƯỢNG KHÔNG ÂM ----
+        // Loại "phí hủy" (là dịch vụ, SL dương đúng) -> chỉ bắt "hủy" thật sự là hủy đơn.
+        const phiHuy = /phi h[uủ]y|phi.{0,3}huy/i.test(norm(codeText+" "+rec.raw.sanPham));
+        const anyHuy = (codeHasHuy || spHasHuy) && !phiHuy;
+        if(anyHuy && rec.soLuong!=null && rec.soLuong>=0){
+          cancelQtyMismatch.push({ri, code:codeText.trim().slice(0,40),
+            sanPham:String(rec.raw.sanPham).slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
+          rec.cancelQtyMismatch=true;
+        }
+
         // ---- lọc thông tin xuất HĐ: chỉ nhận khi MST hợp lệ HOẶC tên có CHỮ ----
         const mstOk = !isBlank(rec.raw.mst) && /\d{8,}/.test(String(rec.raw.mst).replace(/\D/g,""));
         const tenStr = String(rec.raw.tenMua||"").trim();
@@ -416,7 +427,7 @@ const App = (() => {
 
       return {
         title:tab.title, kind:tab.kind, isZalo, month:tab.month,
-        colMap, rows:out, warnings, emptyDates, cancelMismatch,
+        colMap, rows:out, warnings, emptyDates, cancelMismatch, cancelQtyMismatch,
         missingChuaVat: colMap.donGiaChuaVat==null
       };
     },
@@ -450,7 +461,8 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const cont=document.getElementById("monthContainer"); cont.innerHTML="";
 
     st.months.forEach((mo,idx)=>{
-      const warnCount=mo.sheets.reduce((a,s)=>a+s.warnings.length+s.emptyDates.length,0);
+      const warnCount=mo.sheets.reduce((a,s)=>a+s.warnings.length+s.emptyDates.length
+        +(s.cancelMismatch||[]).length+(s.cancelQtyMismatch||[]).length,0);
       const b=el("button",idx===st.current?"active":"","Tháng "+mo.month);
       if(warnCount){const bd=el("span","badge",warnCount);b.appendChild(bd);}
       b.onclick=()=>{st.current=idx;App._render();};
@@ -515,9 +527,11 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     }
 
     if(sh.warnings.length) box.appendChild(App._panelWarnings(sh));
+    if((sh.cancelQtyMismatch||[]).length) box.appendChild(App._panelCancelQty(sh));
     if((sh.cancelMismatch||[]).length) box.appendChild(App._panelCancel(sh));
     if(sh.emptyDates.length) box.appendChild(App._panelEmpty(sh));
-    if(!sh.warnings.length && !sh.emptyDates.length && !(sh.cancelMismatch||[]).length){
+    if(!sh.warnings.length && !sh.emptyDates.length && !(sh.cancelMismatch||[]).length
+       && !(sh.cancelQtyMismatch||[]).length){
       const ok=el("div","review");
       const head=el("div","review-head ok-h");
       head.innerHTML="<span>✓ Không phát hiện vấn đề cần sửa — tab này sạch</span>";
@@ -557,6 +571,33 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     rec[w.field].full = w.keep;
     rec[w.field].html = App._util.escapeHtml(w.keep).replace(/\n/g,"<br>");
     App._refreshPreview(sh);
+  };
+
+  // panel: có chữ HỦY nhưng SỐ LƯỢNG không âm -> cho sửa số lượng
+  App._panelCancelQty=function(sh){
+    const p=el("div","review");
+    const head=el("div","review-head warn-h");
+    head.innerHTML=`<span>⛔ ${sh.cancelQtyMismatch.length} đơn ghi HỦY nhưng SỐ LƯỢNG đang để DƯƠNG (đơn hủy phải âm) — kiểm tra & sửa</span><span>▾</span>`;
+    head.onclick=()=>p.classList.toggle("collapsed");
+    const body=el("div","review-body");
+    const tbl=el("table","rv");
+    tbl.innerHTML="<thead><tr><th>Dòng</th><th>Ô mã / SP (có chữ hủy)</th><th>SL hiện tại</th><th>Sửa số lượng (vd -1)</th></tr></thead>";
+    const tb=el("tbody");
+    sh.cancelQtyMismatch.forEach(cm=>{
+      const tr=el("tr");
+      tr.innerHTML=`<td>${cm.ri+1}</td>`+
+        `<td><span class="tag txt">${App._util.escapeHtml(cm.code||cm.sanPham)}</span></td>`+
+        `<td><b style="color:var(--danger)">${cm.sl}</b></td>`;
+      const td=el("td");const inp=el("input");inp.type="text";inp.value=cm.fixed;
+      inp.style.cssText="font-size:12px;width:90px";
+      inp.oninput=e=>{cm.fixed=e.target.value;const rec=sh.rows.find(r=>r.ri===cm.ri);
+        const v=App._util.num(e.target.value);
+        if(rec&&v!=null){rec.soLuong=v;rec.isCancel=(v<0);}
+        App._refreshPreview(sh);};
+      td.appendChild(inp);tr.appendChild(td);tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);body.appendChild(tbl);p.appendChild(head);p.appendChild(body);
+    return p;
   };
 
   // panel: mã có 'HỦY' nhưng tên SP chưa có 'hủy' (yêu cầu 6)
@@ -1026,7 +1067,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       (ws["!merges"]||[]).forEach(m=>{ if(m.e.r>m.s.r) mergeRows[m.s.r]=Math.max(mergeRows[m.s.r]||1,m.e.r-m.s.r+1); });
 
       const esc=App._util.escapeHtml, cellHasNote=App._util.cellHasNote, norm=App._util.norm;
-      const rows=[], warnings=[], emptyDates=[], cancelMismatch=[];
+      const rows=[], warnings=[], emptyDates=[], cancelMismatch=[], cancelQtyMismatch=[];
       let stt=0;
       for(let r=2;r<aoa.length;r++){
         const row=aoa[r]; if(!row)continue;
@@ -1069,6 +1110,11 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         const spHasHuy=/huy/i.test(norm(sp));
         if(codeHasHuy && !spHasHuy && sp.trim()!=="")
           cancelMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,60), sanPham:sp, fixed:sp});
+        // PHÁT HIỆN LẠI: có chữ HỦY nhưng số lượng KHÔNG âm (loại "phí hủy")
+        const phiHuy=/phi h[uủ]y|phi.{0,3}huy/i.test(norm(oid+" "+mv+" "+sp));
+        if((codeHasHuy||spHasHuy) && !phiHuy && rec.soLuong!=null && rec.soLuong>=0)
+          cancelQtyMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,40),
+            sanPham:sp.slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
         // PHÁT HIỆN LẠI: ngày order trống (bỏ qua dòng con merge)
         const isSlaveRow = mergeRows[r]===undefined && (ci.orderId>=0 && String(g("orderId")).trim()==="" && (isZalo||String(g("maVan")).trim()===""));
         if(String(g("ngayOrder")).trim()==="" && !isSlaveRow)
@@ -1085,7 +1131,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       // dọn daybreak thừa đầu/cuối
       while(rows.length && rows[0].type==="daybreak") rows.shift();
       while(rows.length && rows[rows.length-1].type==="daybreak") rows.pop();
-      const sh={title:name,kind,isZalo,month,rows,warnings,emptyDates,cancelMismatch,
+      const sh={title:name,kind,isZalo,month,rows,warnings,emptyDates,cancelMismatch,cancelQtyMismatch,
         missingChuaVat:false,colMap:{}};
       (byMonth[month]=byMonth[month]||[]).push(sh);
     });
@@ -1100,7 +1146,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.3.3</b> — (bản hiện tại)
+<b>v1.4.0</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Thêm phát hiện <b>đơn ghi HỦY nhưng số lượng để DƯƠNG</b> (đơn hủy phải âm) —
+      liệt kê để sửa số lượng. Tự loại "phí hủy" (là dịch vụ, SL dương đúng).</li>
+</ul>
+<b>v1.3.3</b>
 <ul style="margin:4px 0 10px">
   <li><b>Sửa lỗi mở lại file Excel</b>: giờ <b>phát hiện lại</b> các ô mã có chữ ghi chú,
       đơn HỦY chưa khớp tên SP, và ngày order trống (trước import xong không thấy gì để sửa).
