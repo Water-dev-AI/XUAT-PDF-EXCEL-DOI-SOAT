@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.3.3";
 
 const App = (() => {
   "use strict";
@@ -423,7 +423,7 @@ const App = (() => {
 
     /* render + export ở phần kế tiếp (app2.js nối vào) */
     _state:()=>state,
-    _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,OUT_COLS,OUT_LABEL,APP_VERSION}
+    _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,cellHasNote,OUT_COLS,OUT_LABEL,APP_VERSION}
   };
 })();
 
@@ -1025,15 +1025,15 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       const mergeRows={};
       (ws["!merges"]||[]).forEach(m=>{ if(m.e.r>m.s.r) mergeRows[m.s.r]=Math.max(mergeRows[m.s.r]||1,m.e.r-m.s.r+1); });
 
-      const esc=App._util.escapeHtml;
-      const rows=[]; let stt=0;
+      const esc=App._util.escapeHtml, cellHasNote=App._util.cellHasNote, norm=App._util.norm;
+      const rows=[], warnings=[], emptyDates=[], cancelMismatch=[];
+      let stt=0;
       for(let r=2;r<aoa.length;r++){
         const row=aoa[r]; if(!row)continue;
         const allEmpty=row.every(v=>String(v).trim()==="");
         if(String(row[0]).trim().startsWith("↳")){
           const prev=rows[rows.length-1];
           if(prev){prev.hasVatInfo=true;
-            // tách lại MST/Tên/Đc/Email từ dòng phụ
             const line=String(row[0]).replace(/^↳\s*/,"");
             line.split(/\s*\|\s*/).forEach(p=>{
               const mm=p.match(/^(MST|Tên|Đ\/c|Email):\s*(.*)$/i);
@@ -1051,21 +1051,41 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         const oid=String(g("orderId")), mv=String(g("maVan")), sp=String(g("sanPham"));
         const rec={type:"row",ri:r,raw:{
           ngayOrder:g("ngayOrder"),ngayDV:g("ngayDV"),sanPham:sp,mst:"",tenMua:"",diaChi:"",email:""},
-          html:{sanPham:esc(sp)},
+          html:{sanPham:esc(sp).replace(/\n/g,"<br>")},
           orderId:{full:oid,html:esc(oid).replace(/\n/g,"<br>")},
           maVan:{full:mv,html:esc(mv).replace(/\n/g,"<br>")},
           soLuong:num(g("soLuong")),donGiaGiam:num(g("donGiaGiam")),
           donGiaChuaVat:num(g("donGiaChuaVat"))
         };
         rec.isCancel=(rec.soLuong!=null&&rec.soLuong<0);
+
+        // PHÁT HIỆN LẠI: ô mã có chữ ghi chú
+        [["orderId",oid,"Mã Order ID"],["maVan",mv,"Mã Đơn Vận/Hàng"]].forEach(([k,v,lbl])=>{
+          if(v && cellHasNote(v))
+            warnings.push({ri:r, field:k, fieldLabel:lbl, full:v, keep:v});
+        });
+        // PHÁT HIỆN LẠI: mã có HỦY nhưng tên SP chưa có hủy
+        const codeHasHuy=/huy/i.test(norm(oid+" "+mv));
+        const spHasHuy=/huy/i.test(norm(sp));
+        if(codeHasHuy && !spHasHuy && sp.trim()!=="")
+          cancelMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,60), sanPham:sp, fixed:sp});
+        // PHÁT HIỆN LẠI: ngày order trống (bỏ qua dòng con merge)
+        const isSlaveRow = mergeRows[r]===undefined && (ci.orderId>=0 && String(g("orderId")).trim()==="" && (isZalo||String(g("maVan")).trim()===""));
+        if(String(g("ngayOrder")).trim()==="" && !isSlaveRow)
+          emptyDates.push({ri:r, ngayDV:rec.raw.ngayDV, sanPham:sp, fixed:""});
+
         if(mergeRows[r]){rec.orderIdRowSpan=mergeRows[r];rec.maVanRowSpan=mergeRows[r];}
-        stt++; rec.stt=ci.stt>=0&&g("stt")!==""?num(g("stt")):stt; rec.sttRowSpan=mergeRows[r]||1;
+        // STT: dòng con merge (ô mã trống do bị anchor phủ) -> không tăng
+        const isMergeChild = String(g("orderId")).trim()==="" && (isZalo? true : String(g("maVan")).trim()==="")
+                             && rows.length && rows[rows.length-1].type==="row";
+        if(isMergeChild && !mergeRows[r]){ rec.orderIdHiddenByMerge=true; rec.stt=null; }
+        else { stt++; rec.stt=(ci.stt>=0&&g("stt")!=="")?num(g("stt")):stt; rec.sttRowSpan=mergeRows[r]||1; }
         rows.push(rec);
       }
       // dọn daybreak thừa đầu/cuối
       while(rows.length && rows[0].type==="daybreak") rows.shift();
       while(rows.length && rows[rows.length-1].type==="daybreak") rows.pop();
-      const sh={title:name,kind,isZalo,month,rows,warnings:[],emptyDates:[],cancelMismatch:[],
+      const sh={title:name,kind,isZalo,month,rows,warnings,emptyDates,cancelMismatch,
         missingChuaVat:false,colMap:{}};
       (byMonth[month]=byMonth[month]||[]).push(sh);
     });
@@ -1080,7 +1100,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.3.2</b> — (bản hiện tại)
+<b>v1.3.3</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li><b>Sửa lỗi mở lại file Excel</b>: giờ <b>phát hiện lại</b> các ô mã có chữ ghi chú,
+      đơn HỦY chưa khớp tên SP, và ngày order trống (trước import xong không thấy gì để sửa).
+      Đồng thời tính lại STT đúng theo đơn merge (không nhảy số ở dòng con).</li>
+</ul>
+<b>v1.3.2</b>
 <ul style="margin:4px 0 10px">
   <li><b>Sửa lỗi nút tải Excel không hoạt động</b>: thư viện Excel (xlsx-js-style)
       đổi sang CDN jsDelivr (cdnjs không có gói này) + fallback unpkg. Thêm thông báo
