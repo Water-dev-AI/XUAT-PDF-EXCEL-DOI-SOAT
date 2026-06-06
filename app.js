@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.7";
+const APP_VERSION = "1.2.9";
 
 const App = (() => {
   "use strict";
@@ -46,7 +46,7 @@ const App = (() => {
   const OUT_LABEL = {
     stt:"STT", ngayOrder:"Ngày Order", ngayDV:"Ngày Cung Cấp DV", orderId:"Mã Order ID",
     maVan:"Mã Đơn Vận / Đơn Hàng", sanPham:"Dịch Vụ / Sản Phẩm", soLuong:"SL",
-    donGiaGiam:"Đơn Giá (sau giảm)", donGiaChuaVat:"Đơn Giá Chưa VAT (sau giảm, trừ SIM trắng)"
+    donGiaGiam:"Đơn Giá\n(sau giảm)", donGiaChuaVat:"Đơn Giá Chưa VAT\n(sau giảm, trừ SIM trắng)"
   };
   const VAT_RATE = 1.1; // 10%
 
@@ -311,13 +311,19 @@ const App = (() => {
         });
 
         // merge info. Cột "neo merge": SHOPEE = maVan, ZALO = orderId (vì ZALO bỏ maVan).
-        const mvCol=colMap["maVan"], oiCol=colMap["orderId"], odCol=colMap["ngayOrder"];
+        const mvCol=colMap["maVan"], oiCol=colMap["orderId"], odCol=colMap["ngayOrder"], ddvCol=colMap["ngayDV"];
         const anchorCol = (!isZalo && mvCol!=null) ? mvCol : oiCol;
         rec.mergeTop = (anchorCol!=null && mergeAnchor[ri+"_"+anchorCol]) ? mergeAnchor[ri+"_"+anchorCol].rows : 1;
         rec.isMergedSlave = anchorCol!=null && !!mergedInto[ri+"_"+anchorCol];
 
+        // merge RIÊNG cho 2 cột ngày (giữ y như bản gốc: nếu gốc merge thì xuất cũng merge)
+        rec.ngayOrderRowSpan = (odCol!=null && mergeAnchor[ri+"_"+odCol]) ? mergeAnchor[ri+"_"+odCol].rows : 1;
+        rec.ngayOrderSlave   = odCol!=null && !!mergedInto[ri+"_"+odCol];
+        rec.ngayDVRowSpan    = (ddvCol!=null && mergeAnchor[ri+"_"+ddvCol]) ? mergeAnchor[ri+"_"+ddvCol].rows : 1;
+        rec.ngayDVSlave      = ddvCol!=null && !!mergedInto[ri+"_"+ddvCol];
+
         // ngày order có nằm trong block merge không (thừa hưởng ngày phía trên)?
-        rec.ngayOrderMerged = odCol!=null && !!mergedInto[ri+"_"+odCol];
+        rec.ngayOrderMerged = rec.ngayOrderSlave;
         const isContinuation = rec.ngayOrderMerged || rec.isMergedSlave ||
           (isBlank(rec.raw.orderId) && isBlank(rec.raw.maVan) && out.length &&
            out[out.length-1].type==="row");
@@ -622,7 +628,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const cols=OUT_COLS.filter(c=>!(sh.isZalo&&c==="maVan"));
     const t=el("table","pv");
     let thead="<thead><tr>";
-    cols.forEach(c=>thead+=`<th>${OUT_LABEL[c]}</th>`);
+    cols.forEach(c=>thead+=`<th>${App._util.escapeHtml(OUT_LABEL[c]).replace(/\n/g,"<br>")}</th>`);
     thead+="</tr></thead>";
     t.innerHTML=thead;
     const tb=el("tbody");
@@ -644,8 +650,17 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
           else td.innerHTML=r.maVan.html||"";
           tr.appendChild(td);return;
         }
-        // dòng con của block (không merge ở đây vì anchor đã rowspan) -> bỏ ô mã/stt
         if(isMergeCol && r.orderIdHiddenByMerge) return;
+        // 2 cột NGÀY: merge y như bản gốc
+        if(c==="ngayOrder" || c==="ngayDV"){
+          const span = c==="ngayOrder"?r.ngayOrderRowSpan:r.ngayDVRowSpan;
+          const slave= c==="ngayOrder"?r.ngayOrderSlave:r.ngayDVSlave;
+          if(slave) return;                 // dòng con của merge ngày -> bị anchor phủ
+          const td=el("td");
+          if(span>1){ td.rowSpan=span; td.className="merged-cell"; }
+          td.textContent=r.raw[c]??"";
+          tr.appendChild(td);return;
+        }
         const td=el("td");
         if(c==="stt"){td.className="num";td.textContent=r.stt==null?"":r.stt;tr.appendChild(td);return;}
         if(c==="orderId"){td.className="code";td.innerHTML=r.orderId.html||"";tr.appendChild(td);return;}
@@ -685,7 +700,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 (function(){
   const S=()=>App._state();
   const {fmtNum,isBlank,OUT_LABEL,num}=App._util;
-  const COLW={stt:4,ngayOrder:11,ngayDV:11,orderId:20,maVan:20,sanPham:44,soLuong:5,donGiaGiam:14,donGiaChuaVat:18};
+  const COLW={stt:4,ngayOrder:11,ngayDV:11,orderId:20,maVan:20,sanPham:48,soLuong:5,donGiaGiam:11,donGiaChuaVat:12};
 
   function monthsToExport(scope){
     const st=S();
@@ -712,18 +727,33 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 
     sh.rows.forEach(r=>{
       if(r.type==="daybreak"){aoa.push(cols.map(()=> ""));htmlMx.push(cols.map(()=> ""));rowMeta.push("daybreak");return;}
-      const slave = !!r.orderIdHiddenByMerge;  // dòng con của block merge (cả SHOPEE & ZALO)
+      const slave = !!r.orderIdHiddenByMerge;  // dòng con của block merge mã (cả SHOPEE & ZALO)
       const line=cols.map(c=>cellVal(r,c,sh,slave));
       const lineH=cols.map(c=>cellHtml(r,c,sh,slave));
+      // 2 cột ngày: nếu là dòng con của merge ngày -> để trống (anchor sẽ rowspan)
+      ["ngayOrder","ngayDV"].forEach(c=>{
+        const ci=cols.indexOf(c); if(ci<0)return;
+        const sl = c==="ngayOrder"?r.ngayOrderSlave:r.ngayDVSlave;
+        if(sl){ line[ci]=""; lineH[ci]=""; }
+      });
       aoa.push(line);htmlMx.push(lineH);rowMeta.push(r.isCancel?"cancel":"data");
+      const top=aoa.length-1;
 
-      // merge cho block anchor (cả SHOPEE & ZALO): STT + orderId + maVan(nếu có)
+      // merge cột mã theo đơn (STT + orderId + maVan)
       if(!slave && r.orderIdRowSpan && r.orderIdRowSpan>1){
-        const top=aoa.length-1;
         ["stt","orderId","maVan"].forEach(k=>{
           const ci=cols.indexOf(k);
           if(ci>=0) merges.push({s:{r:top,c:ci},e:{r:top+r.orderIdRowSpan-1,c:ci}});
         });
+      }
+      // merge 2 cột ngày theo bản gốc (độc lập với mã)
+      if(!r.ngayOrderSlave && r.ngayOrderRowSpan>1){
+        const ci=cols.indexOf("ngayOrder");
+        if(ci>=0) merges.push({s:{r:top,c:ci},e:{r:top+r.ngayOrderRowSpan-1,c:ci}});
+      }
+      if(!r.ngayDVSlave && r.ngayDVRowSpan>1){
+        const ci=cols.indexOf("ngayDV");
+        if(ci>=0) merges.push({s:{r:top,c:ci},e:{r:top+r.ngayDVRowSpan-1,c:ci}});
       }
       if(r.hasVatInfo){
         const parts=[];
@@ -900,7 +930,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     });
     const totalW=cols.reduce((a,c)=>a+(COLW[c]||12),0);
     html+="<table><colgroup>"+cols.map(c=>`<col style="width:${((COLW[c]||12)/totalW*100).toFixed(2)}%">`).join("")+"</colgroup>";
-    html+="<thead><tr>"+cols.map(c=>`<th>${esc(OUT_LABEL[c])}</th>`).join("")+"</tr></thead><tbody>";
+    html+="<thead><tr>"+cols.map(c=>`<th>${esc(OUT_LABEL[c]).replace(/\n/g,"<br>")}</th>`).join("")+"</tr></thead><tbody>";
     for(let ri=0;ri<htmlMx.length;ri++){
       const meta=rowMeta[ri];
       if(meta==="header")continue;
@@ -1039,20 +1069,29 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.7</b> — (bản hiện tại)
+<b>v1.2.9</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>2 cột đơn giá: phần trong ngoặc xuống dòng riêng ở tiêu đề + <b>thu hẹp cột</b>
+      cho gọn đẹp (trước bị rộng do tiêu đề dài mà số ngắn).</li>
+</ul>
+<b>v1.2.8</b>
+<ul style="margin:4px 0 10px">
+  <li>2 cột <b>Ngày Order</b> &amp; <b>Ngày Cung Cấp DV</b> giờ <b>merge y như bản gốc</b>:
+      nếu trong Google Sheet các ô ngày được gộp thì xuất ra cũng gộp (không còn
+      cảnh 1 hàng có ngày, 2 hàng dưới trống). Nếu gốc mỗi hàng ngày riêng thì giữ riêng.</li>
+</ul>
+<b>v1.2.7</b>
 <ul style="margin:4px 0 10px">
   <li>Ẩn widget <b>"Text to Speech"</b> (do tiện ích trình duyệt tự chèn) trong
-      trang in PDF. Lưu ý: cách triệt để là tắt/gỡ tiện ích đó trên trình duyệt.</li>
+      trang in PDF.</li>
 </ul>
 <b>v1.2.6</b>
 <ul style="margin:4px 0 10px">
-  <li>PDF: cột mã (b..., SPXVN...) <b>dùng cùng font</b> với các cột chữ khác
-      (bỏ font monospace nhìn xấu).</li>
+  <li>PDF: cột mã <b>dùng cùng font</b> với các cột chữ khác (bỏ monospace).</li>
 </ul>
 <b>v1.2.5</b>
 <ul style="margin:4px 0 10px">
-  <li>Sửa merge cho <b>bảng ZALO</b>: ô Mã Order ID merge nhiều hàng (1 đơn nhiều SP)
-      giờ giữ đúng dạng merge — không còn thành 1 ô có mã + 1 ô trống.</li>
+  <li>Sửa merge cho <b>bảng ZALO</b> (ô Mã Order ID merge nhiều hàng).</li>
 </ul>
 <b>v1.2.4</b>
 <ul style="margin:4px 0 10px">
