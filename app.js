@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.2.9";
+const APP_VERSION = "1.3.0";
 
 const App = (() => {
   "use strict";
@@ -46,7 +46,7 @@ const App = (() => {
   const OUT_LABEL = {
     stt:"STT", ngayOrder:"Ngày Order", ngayDV:"Ngày Cung Cấp DV", orderId:"Mã Order ID",
     maVan:"Mã Đơn Vận / Đơn Hàng", sanPham:"Dịch Vụ / Sản Phẩm", soLuong:"SL",
-    donGiaGiam:"Đơn Giá\n(sau giảm)", donGiaChuaVat:"Đơn Giá Chưa VAT\n(sau giảm, trừ SIM trắng)"
+    donGiaGiam:"Đơn Giá\n(sau giảm)", donGiaChuaVat:"Đơn Giá Chưa VAT\n(sau giảm, trừ SIM)"
   };
   const VAT_RATE = 1.1; // 10%
 
@@ -700,7 +700,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 (function(){
   const S=()=>App._state();
   const {fmtNum,isBlank,OUT_LABEL,num}=App._util;
-  const COLW={stt:4,ngayOrder:11,ngayDV:11,orderId:20,maVan:20,sanPham:48,soLuong:5,donGiaGiam:11,donGiaChuaVat:12};
+  const COLW={stt:4,ngayOrder:11,ngayDV:11,orderId:20,maVan:20,sanPham:47,soLuong:5,donGiaGiam:11,donGiaChuaVat:14};
 
   function monthsToExport(scope){
     const st=S();
@@ -888,7 +888,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 
   function buildPdfHtml(mo,sh){
     const {cols,htmlMx,rowMeta,merges}=sheetMatrix(sh);
-    let html=`<html><head><meta charset="utf-8"><title>${titleFor(mo)} — ${sh.kind}</title><style>
+    let html=`<html><head><meta charset="utf-8"><title>${titleFor(mo)} · ${sh.title}</title><style>
       @page{size:A4 landscape;margin:8mm}
       *{box-sizing:border-box}
       html,body{margin:0;padding:0}
@@ -921,7 +921,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       }
     </style></head><body>`;
     html+=`<div class="doc-title">${esc(titleFor(mo))}</div>`;
-    html+=`<div class="sheet-title">${esc(sh.title)} — ${sh.kind}</div>`;
+    html+=`<div class="sheet-title">${esc(sh.title)}</div>`;
 
     const spanAt={}, skip={};
     merges.forEach(m=>{
@@ -1069,16 +1069,18 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.2.9</b> — (bản hiện tại)
+<b>v1.3.0</b> — (bản hiện tại)
 <ul style="margin:4px 0 10px">
-  <li>2 cột đơn giá: phần trong ngoặc xuống dòng riêng ở tiêu đề + <b>thu hẹp cột</b>
-      cho gọn đẹp (trước bị rộng do tiêu đề dài mà số ngắn).</li>
+  <li>PDF: bỏ chữ <b>"SHOPEE"/"ZALO" bị lặp</b> ở phụ đề (đã có trong tên tab "T3 SHOPEE").</li>
+  <li>Header cột "Đơn Giá Chưa VAT" gọn lại còn <b>2 dòng</b> (rút "trừ SIM trắng" → "trừ SIM").</li>
+</ul>
+<b>v1.2.9</b>
+<ul style="margin:4px 0 10px">
+  <li>2 cột đơn giá: phần trong ngoặc xuống dòng riêng + thu hẹp cột cho gọn đẹp.</li>
 </ul>
 <b>v1.2.8</b>
 <ul style="margin:4px 0 10px">
-  <li>2 cột <b>Ngày Order</b> &amp; <b>Ngày Cung Cấp DV</b> giờ <b>merge y như bản gốc</b>:
-      nếu trong Google Sheet các ô ngày được gộp thì xuất ra cũng gộp (không còn
-      cảnh 1 hàng có ngày, 2 hàng dưới trống). Nếu gốc mỗi hàng ngày riêng thì giữ riêng.</li>
+  <li>2 cột <b>Ngày Order</b> &amp; <b>Ngày Cung Cấp DV</b> merge y như bản gốc.</li>
 </ul>
 <b>v1.2.7</b>
 <ul style="margin:4px 0 10px">
