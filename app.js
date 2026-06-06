@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.4.1";
 
 const App = (() => {
   "use strict";
@@ -556,8 +556,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       tr.innerHTML=`<td>${w.ri+1}</td><td>${w.fieldLabel}</td>`;
       const td=el("td");
       const ta=el("textarea");
-      ta.value=w.keep; ta.rows=Math.min(4,(String(w.keep).match(/\n/g)||[]).length+1);
-      ta.style.cssText="width:100%;font-family:ui-monospace,monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical";
+      ta.value=w.keep;
+      const nLines=(String(w.keep).match(/\n/g)||[]).length+1;
+      ta.rows=Math.max(2, nLines);
+      ta.style.cssText="width:100%;font-family:ui-monospace,monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical;line-height:1.4;box-sizing:border-box";
       ta.oninput=e=>{w.keep=e.target.value;App._applyWarningFix(sh,w);};
       td.appendChild(ta);tr.appendChild(td);tb.appendChild(tr);
     });
@@ -673,6 +675,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     thead+="</tr></thead>";
     t.innerHTML=thead;
     const tb=el("tbody");
+    let pendingVatAnchor=null, pendingVatRemain=0;
 
     sh.rows.forEach(r=>{
       if(r.type==="daybreak"){
@@ -717,19 +720,44 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       });
       tb.appendChild(tr);
 
-      if(r.hasVatInfo){
-        const tr2=el("tr","vatinfo");
-        const parts=[];
-        if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
-        if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
-        if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
-        if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
-        tr2.innerHTML=`<td colspan="${cols.length}">↳ ${App._util.escapeHtml(parts.join("  |  "))}</td>`;
-        tb.appendChild(tr2);
+      // Dòng phụ VAT: nếu đơn này merge nhiều dòng, PHẢI chèn SAU dòng con cuối
+      // (không chèn giữa block merge -> sẽ phá rowspan, lệch dòng).
+      if(r.hasVatInfo && !r.orderIdHiddenByMerge){
+        const span = r.orderIdRowSpan||1;
+        if(span<=1){
+          tb.appendChild(App._vatRow(r,cols.length));   // đơn 1 dòng -> chèn ngay
+        } else {
+          r._pendingVatSpan = span-1;                    // còn span-1 dòng con nữa rồi mới chèn
+          r._pendingVat = true;
+        }
       }
+      // nếu đang chờ chèn VAT và đây là dòng con cuối của block -> chèn sau dòng con
+      if(pendingVatAnchor){
+        pendingVatRemain--;
+        if(pendingVatRemain<=0){
+          tb.appendChild(App._vatRow(pendingVatAnchor,cols.length));
+          pendingVatAnchor=null;
+        }
+      }
+      if(r._pendingVat){ pendingVatAnchor=r; pendingVatRemain=r._pendingVatSpan; }
     });
+    // nếu còn sót (block ở cuối bảng)
+    if(pendingVatAnchor) tb.appendChild(App._vatRow(pendingVatAnchor,cols.length));
     t.appendChild(tb);
     return t;
+  };
+
+  // tạo 1 dòng phụ thông tin xuất hóa đơn
+  App._vatRow=function(r,ncol){
+    const {isBlank,escapeHtml}=App._util;
+    const tr2=document.createElement("tr"); tr2.className="vatinfo";
+    const parts=[];
+    if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
+    if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
+    if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
+    if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
+    tr2.innerHTML=`<td colspan="${ncol}">↳ ${escapeHtml(parts.join("  |  "))}</td>`;
+    return tr2;
   };
 
   App._util.OUT_COLS_for=sh=>OUT_COLS.filter(c=>!(sh.isZalo&&c==="maVan"));
@@ -766,6 +794,21 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const merges=[];
     const rowMeta=["header"];
 
+    let pendVat=null, pendRemain=0; // hoãn dòng VAT đến sau dòng con cuối của đơn merge
+
+    const pushVat=(r)=>{
+      const parts=[];
+      if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
+      if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
+      if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
+      if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
+      const txt="↳ "+parts.join("   |   ");
+      const vrow=cols.map(()=> "");vrow[0]=txt;
+      const vrowH=cols.map(()=> "");vrowH[0]=App._util.escapeHtml(txt);
+      aoa.push(vrow);htmlMx.push(vrowH);rowMeta.push("vatinfo");
+      merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:cols.length-1}});
+    };
+
     sh.rows.forEach(r=>{
       if(r.type==="daybreak"){aoa.push(cols.map(()=> ""));htmlMx.push(cols.map(()=> ""));rowMeta.push("daybreak");return;}
       const slave = !!r.orderIdHiddenByMerge;  // dòng con của block merge mã (cả SHOPEE & ZALO)
@@ -796,19 +839,18 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         const ci=cols.indexOf("ngayDV");
         if(ci>=0) merges.push({s:{r:top,c:ci},e:{r:top+r.ngayDVRowSpan-1,c:ci}});
       }
-      if(r.hasVatInfo){
-        const parts=[];
-        if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
-        if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
-        if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
-        if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
-        const txt="↳ "+parts.join("   |   ");
-        const vrow=cols.map(()=> "");vrow[0]=txt;
-        const vrowH=cols.map(()=> "");vrowH[0]=App._util.escapeHtml(txt);
-        aoa.push(vrow);htmlMx.push(vrowH);rowMeta.push("vatinfo");
-        merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:cols.length-1}});
+
+      // dòng con cuối của block -> nếu có VAT đang chờ thì chèn SAU dòng này
+      if(pendVat){ pendRemain--; if(pendRemain<=0){ pushVat(pendVat); pendVat=null; } }
+
+      // đăng ký VAT: đơn 1 dòng -> chèn ngay; đơn merge -> chờ hết dòng con
+      if(r.hasVatInfo && !slave){
+        const span=r.orderIdRowSpan||1;
+        if(span<=1) pushVat(r);
+        else { pendVat=r; pendRemain=span-1; }
       }
     });
+    if(pendVat) pushVat(pendVat); // block ở cuối bảng
     return {cols,aoa,htmlMx,merges,rowMeta};
   }
   // giá trị text (Excel)
@@ -1146,7 +1188,14 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.4.0</b> — (bản hiện tại)
+<b>v1.4.1</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>dòng thông tin xuất hóa đơn (MST...) nhảy sai vị trí</b> khi đơn
+      merge nhiều dòng — giờ dòng MST nằm SAU cả block merge, không chen vào giữa
+      làm lệch dòng. (PDF, Excel, xem trước)</li>
+  <li>Sửa ô sửa mã (textarea) <b>bị che mất dòng dưới</b> — giờ cao đủ theo số dòng.</li>
+</ul>
+<b>v1.4.0</b>
 <ul style="margin:4px 0 10px">
   <li>Thêm phát hiện <b>đơn ghi HỦY nhưng số lượng để DƯƠNG</b> (đơn hủy phải âm) —
       liệt kê để sửa số lượng. Tự loại "phí hủy" (là dịch vụ, SL dương đúng).</li>
