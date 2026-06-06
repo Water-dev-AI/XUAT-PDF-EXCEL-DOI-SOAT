@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.3.1";
+const APP_VERSION = "1.3.2";
 
 const App = (() => {
   "use strict";
@@ -798,7 +798,14 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
                 left:{style:"thin",color:{rgb:"BBBBBB"}},right:{style:"thin",color:{rgb:"BBBBBB"}}};
   const numFmt='#,##0';
   App.exportExcel=function(scope){
+    if(typeof XLSX==="undefined"){
+      alert("Thư viện tạo Excel chưa tải được (có thể do mạng chặn CDN). "+
+            "Hãy kiểm tra kết nối rồi tải lại trang (Ctrl/Cmd + Shift + R).");
+      return;
+    }
     const mos=monthsToExport(scope);
+    if(!mos.length || mos.some(m=>!m)){ alert("Chưa có dữ liệu tháng để xuất."); return; }
+    try{
     mos.forEach(mo=>{
       const wb=XLSX.utils.book_new();
       mo.sheets.forEach(sh=>{
@@ -850,6 +857,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       const yr=(titleFor(mo).match(/20\d{2}/)||["20XX"])[0];
       XLSX.writeFile(wb,`Doi-soat_T${mo.month}_${yr}.xlsx`);
     });
+    }catch(err){
+      alert("Lỗi khi tạo Excel: "+(err&&err.message?err.message:err));
+      console.error("exportExcel error:",err);
+    }
   };
 
   /* ---------- PDF: IN RIÊNG từng bảng (SHOPEE / ZALO) ----------
@@ -1069,7 +1080,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.3.1</b> — (bản hiện tại)
+<b>v1.3.2</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li><b>Sửa lỗi nút tải Excel không hoạt động</b>: thư viện Excel (xlsx-js-style)
+      đổi sang CDN jsDelivr (cdnjs không có gói này) + fallback unpkg. Thêm thông báo
+      lỗi rõ ràng nếu thư viện chưa tải được hoặc chưa có dữ liệu.</li>
+</ul>
+<b>v1.3.1</b>
 <ul style="margin:4px 0 10px">
   <li>Căn <b>giữa theo chiều dọc</b> cho text trong ô (PDF, Excel, xem trước) —
       nhất là các ô merge (STT, ngày, mã) khi đơn có nhiều dòng.</li>
