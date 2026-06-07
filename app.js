@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.3.2";
+const APP_VERSION = "1.5.0";
 
 const App = (() => {
   "use strict";
@@ -74,6 +74,12 @@ const App = (() => {
   const fmtNum = n => n==null?"":Math.round(n).toLocaleString("vi-VN");
   const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
   const escapeHtml = s => String(s==null?"":s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+
+  /* "hủy" ĐỨNG RIÊNG (ranh giới từ) — tránh bắt nhầm "thụy" (Thụy Sĩ), "khuy", "thủy"...
+     Sau norm: "thụy sĩ" -> "thuy si" (KHÔNG khớp \bhuy\b vì 'huy' dính 't' phía trước).
+     "HỦY ĐƠN" -> "huy don" (khớp). "hủy" -> "huy" (khớp).                       */
+  const hasHuy = s => /\bhuy\b/.test(norm(s));
+  const hasPhiHuy = s => /\bphi\s+huy\b/.test(norm(s)); // "phí hủy" là dịch vụ -> loại trừ
 
   /* ----- GIỮ ĐỊNH DẠNG GẠCH NGANG (strikethrough) + XUỐNG DÒNG ------------
      Google Sheets cho biết gạch ngang theo 2 cách:
@@ -262,6 +268,8 @@ const App = (() => {
       const warnings=[];   // ô mã có chữ ghi chú (để bạn ĐỌC & SỬA full text)
       const emptyDates=[]; // ngày order trống -> review
       const cancelMismatch=[]; // mã có 'hủy' nhưng tên SP chưa có 'hủy'
+      const cancelQtyMismatch=[]; // có 'hủy' nhưng số lượng KHÔNG âm
+      const dateMismatch=[]; // trong 1 đơn, ngày order/DV khác nhau -> lấy hàng trên + cảnh báo
       const getCell=(ri,key)=>{const c=colMap[key];return c==null?"":(rows[ri]?.[c]??"");};
       // lấy grid cell (để đọc định dạng gạch ngang)
       const getGridCell=(ri,key)=>{const c=colMap[key];if(c==null)return null;
@@ -336,8 +344,8 @@ const App = (() => {
 
         // ---- YÊU CẦU 6: ô mã có 'HỦY' nhưng tên SP CHƯA có 'hủy' -> cho sửa tên ----
         const codeText = (String(rec.raw.orderId||"")+" "+String(rec.raw.maVan||""));
-        const codeHasHuy = /h[ủu]y/i.test(norm(codeText)) || /huy/i.test(norm(codeText));
-        const spHasHuy = /huy/i.test(norm(rec.raw.sanPham||""));
+        const codeHasHuy = hasHuy(codeText);
+        const spHasHuy = hasHuy(rec.raw.sanPham||"");
         if(codeHasHuy && !spHasHuy && !isBlank(rec.raw.sanPham)){
           cancelMismatch.push({ri, code:codeText.trim().slice(0,60),
             sanPham:String(rec.raw.sanPham), fixed:String(rec.raw.sanPham)});
@@ -362,6 +370,16 @@ const App = (() => {
         }
         rec.donGiaChuaVat = dgChua;
         rec.isCancel = (rec.soLuong!=null && rec.soLuong<0);
+
+        // ---- PHÁT HIỆN: đơn HỦY (ở mã HOẶC tên SP) nhưng SỐ LƯỢNG KHÔNG ÂM ----
+        // Loại "phí hủy" (là dịch vụ, SL dương đúng) -> chỉ bắt "hủy" thật sự là hủy đơn.
+        const phiHuy = hasPhiHuy(codeText+" "+rec.raw.sanPham);
+        const anyHuy = (codeHasHuy || spHasHuy) && !phiHuy;
+        if(anyHuy && rec.soLuong!=null && rec.soLuong>=0){
+          cancelQtyMismatch.push({ri, code:codeText.trim().slice(0,40),
+            sanPham:String(rec.raw.sanPham).slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
+          rec.cancelQtyMismatch=true;
+        }
 
         // ---- lọc thông tin xuất HĐ: chỉ nhận khi MST hợp lệ HOẶC tên có CHỮ ----
         const mstOk = !isBlank(rec.raw.mst) && /\d{8,}/.test(String(rec.raw.mst).replace(/\D/g,""));
@@ -389,12 +407,14 @@ const App = (() => {
           const oidHtml=r.orderId.html?[r.orderId.html]:[];
           const mvParts=r.maVan.full?[r.maVan.full]:[];
           const mvHtml=r.maVan.html?[r.maVan.html]:[];
+          const blockRows=[r];   // gồm anchor + các dòng con (để gộp ngày)
           for(let j=i+1;j<out.length && span<r.mergeTop;j++){
             const c=out[j]; if(c.type==="daybreak")continue;
             if(c.isMergedSlave){
               if(c.orderId.full){oidParts.push(c.orderId.full);oidHtml.push(c.orderId.html);}
               if(c.maVan.full){mvParts.push(c.maVan.full);mvHtml.push(c.maVan.html);}
               c.orderIdHiddenByMerge=true; span++;
+              blockRows.push(c);
             } else break;
           }
           r.orderId.full=oidParts.join("\n");
@@ -403,6 +423,29 @@ const App = (() => {
           r.maVan.html=mvHtml.filter(Boolean).join("<br>");
           r.orderIdRowSpan=span;   // số dòng thực sự gộp được
           r.maVanRowSpan=span;
+
+          // ---- GỘP NGÀY theo block ĐƠN (1 ngày chung cho cả đơn) ----
+          // Xét riêng từng cột (ngayOrder, ngayDV): nếu mọi hàng giống nhau -> lấy luôn;
+          // nếu khác nhau -> lấy hàng TRÊN CÙNG (anchor) + cảnh báo.
+          [["ngayOrder","Ngày Order"],["ngayDV","Ngày Cung Cấp DV"]].forEach(([key,lbl])=>{
+            const vals=blockRows.map(b=>String(b.raw[key]||"").trim());
+            const nonEmpty=vals.filter(v=>v!=="");
+            const uniq=[...new Set(nonEmpty)];
+            const chosen = vals[0]!=="" ? vals[0] : (nonEmpty[0]||""); // ưu tiên hàng trên cùng
+            // ép cả block dùng 1 ngày: anchor giữ ngày, dòng con -> slave (bị merge phủ)
+            r.raw[key]=chosen;
+            const spanKey = key==="ngayOrder" ? "ngayOrderRowSpan" : "ngayDVRowSpan";
+            const slaveKey= key==="ngayOrder" ? "ngayOrderSlave"   : "ngayDVSlave";
+            r[spanKey]=span; r[slaveKey]=false;
+            for(let k=1;k<blockRows.length;k++){ blockRows[k][slaveKey]=true; blockRows[k][spanKey]=1; }
+            // cảnh báo nếu trong đơn có >1 ngày khác nhau
+            if(uniq.length>1){
+              dateMismatch.push({ri:r.ri, col:key, colLabel:lbl,
+                values:uniq.join("  ≠  "), chosen, fixed:chosen,
+                ma:(r.maVan.full||r.orderId.full||"").split("\n")[0].slice(0,30)});
+              r[(key==="ngayOrder"?"ngayOrderConflict":"ngayDVConflict")]=true;
+            }
+          });
         }
       }
 
@@ -416,14 +459,14 @@ const App = (() => {
 
       return {
         title:tab.title, kind:tab.kind, isZalo, month:tab.month,
-        colMap, rows:out, warnings, emptyDates, cancelMismatch,
+        colMap, rows:out, warnings, emptyDates, cancelMismatch, cancelQtyMismatch, dateMismatch,
         missingChuaVat: colMap.donGiaChuaVat==null
       };
     },
 
     /* render + export ở phần kế tiếp (app2.js nối vào) */
     _state:()=>state,
-    _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,OUT_COLS,OUT_LABEL,APP_VERSION}
+    _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,cellHasNote,hasHuy,hasPhiHuy,OUT_COLS,OUT_LABEL,APP_VERSION}
   };
 })();
 
@@ -450,7 +493,8 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const cont=document.getElementById("monthContainer"); cont.innerHTML="";
 
     st.months.forEach((mo,idx)=>{
-      const warnCount=mo.sheets.reduce((a,s)=>a+s.warnings.length+s.emptyDates.length,0);
+      const warnCount=mo.sheets.reduce((a,s)=>a+s.warnings.length+s.emptyDates.length
+        +(s.cancelMismatch||[]).length+(s.cancelQtyMismatch||[]).length+(s.dateMismatch||[]).length,0);
       const b=el("button",idx===st.current?"active":"","Tháng "+mo.month);
       if(warnCount){const bd=el("span","badge",warnCount);b.appendChild(bd);}
       b.onclick=()=>{st.current=idx;App._render();};
@@ -515,9 +559,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     }
 
     if(sh.warnings.length) box.appendChild(App._panelWarnings(sh));
+    if((sh.dateMismatch||[]).length) box.appendChild(App._panelDateMismatch(sh));
+    if((sh.cancelQtyMismatch||[]).length) box.appendChild(App._panelCancelQty(sh));
     if((sh.cancelMismatch||[]).length) box.appendChild(App._panelCancel(sh));
     if(sh.emptyDates.length) box.appendChild(App._panelEmpty(sh));
-    if(!sh.warnings.length && !sh.emptyDates.length && !(sh.cancelMismatch||[]).length){
+    if(!sh.warnings.length && !sh.emptyDates.length && !(sh.cancelMismatch||[]).length
+       && !(sh.cancelQtyMismatch||[]).length && !(sh.dateMismatch||[]).length){
       const ok=el("div","review");
       const head=el("div","review-head ok-h");
       head.innerHTML="<span>✓ Không phát hiện vấn đề cần sửa — tab này sạch</span>";
@@ -542,8 +589,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       tr.innerHTML=`<td>${w.ri+1}</td><td>${w.fieldLabel}</td>`;
       const td=el("td");
       const ta=el("textarea");
-      ta.value=w.keep; ta.rows=Math.min(4,(String(w.keep).match(/\n/g)||[]).length+1);
-      ta.style.cssText="width:100%;font-family:ui-monospace,monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical";
+      ta.value=w.keep;
+      const nLines=(String(w.keep).match(/\n/g)||[]).length+1;
+      ta.rows=Math.max(2, nLines);
+      ta.style.cssText="width:100%;font-family:ui-monospace,monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical;line-height:1.4;box-sizing:border-box";
       ta.oninput=e=>{w.keep=e.target.value;App._applyWarningFix(sh,w);};
       td.appendChild(ta);tr.appendChild(td);tb.appendChild(tr);
     });
@@ -557,6 +606,56 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     rec[w.field].full = w.keep;
     rec[w.field].html = App._util.escapeHtml(w.keep).replace(/\n/g,"<br>");
     App._refreshPreview(sh);
+  };
+
+  // panel: trong 1 đơn merge, ngày (order/DV) các hàng KHÁC nhau -> đã lấy hàng trên, cho sửa
+  App._panelDateMismatch=function(sh){
+    const p=el("div","review");
+    const head=el("div","review-head warn-h");
+    head.innerHTML=`<span>📅 ${sh.dateMismatch.length} đơn có NGÀY khác nhau giữa các dòng — đã lấy ngày hàng trên cùng, kiểm tra & sửa nếu cần</span><span>▾</span>`;
+    head.onclick=()=>p.classList.toggle("collapsed");
+    const body=el("div","review-body");
+    const tbl=el("table","rv");
+    tbl.innerHTML="<thead><tr><th>Dòng</th><th>Mã</th><th>Cột</th><th>Các ngày khác nhau</th><th>Ngày dùng (sửa nếu cần)</th></tr></thead>";
+    const tb=el("tbody");
+    sh.dateMismatch.forEach(dm=>{
+      const tr=el("tr");
+      tr.innerHTML=`<td>${dm.ri+1}</td><td><span class="tag code">${App._util.escapeHtml(dm.ma)}</span></td>`+
+        `<td>${dm.colLabel}</td><td><span class="tag txt">${App._util.escapeHtml(dm.values)}</span></td>`;
+      const td=el("td");const inp=el("input");inp.type="text";inp.value=dm.fixed;inp.style.fontSize="12px";
+      inp.oninput=e=>{dm.fixed=e.target.value;const rec=sh.rows.find(r=>r.ri===dm.ri);
+        if(rec)rec.raw[dm.col]=e.target.value;App._refreshPreview(sh);};
+      td.appendChild(inp);tr.appendChild(td);tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);body.appendChild(tbl);p.appendChild(head);p.appendChild(body);
+    return p;
+  };
+
+  // panel: có chữ HỦY nhưng SỐ LƯỢNG không âm -> cho sửa số lượng
+  App._panelCancelQty=function(sh){
+    const p=el("div","review");
+    const head=el("div","review-head warn-h");
+    head.innerHTML=`<span>⛔ ${sh.cancelQtyMismatch.length} đơn ghi HỦY nhưng SỐ LƯỢNG đang để DƯƠNG (đơn hủy phải âm) — kiểm tra & sửa</span><span>▾</span>`;
+    head.onclick=()=>p.classList.toggle("collapsed");
+    const body=el("div","review-body");
+    const tbl=el("table","rv");
+    tbl.innerHTML="<thead><tr><th>Dòng</th><th>Ô mã / SP (có chữ hủy)</th><th>SL hiện tại</th><th>Sửa số lượng (vd -1)</th></tr></thead>";
+    const tb=el("tbody");
+    sh.cancelQtyMismatch.forEach(cm=>{
+      const tr=el("tr");
+      tr.innerHTML=`<td>${cm.ri+1}</td>`+
+        `<td><span class="tag txt">${App._util.escapeHtml(cm.code||cm.sanPham)}</span></td>`+
+        `<td><b style="color:var(--danger)">${cm.sl}</b></td>`;
+      const td=el("td");const inp=el("input");inp.type="text";inp.value=cm.fixed;
+      inp.style.cssText="font-size:12px;width:90px";
+      inp.oninput=e=>{cm.fixed=e.target.value;const rec=sh.rows.find(r=>r.ri===cm.ri);
+        const v=App._util.num(e.target.value);
+        if(rec&&v!=null){rec.soLuong=v;rec.isCancel=(v<0);}
+        App._refreshPreview(sh);};
+      td.appendChild(inp);tr.appendChild(td);tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);body.appendChild(tbl);p.appendChild(head);p.appendChild(body);
+    return p;
   };
 
   // panel: mã có 'HỦY' nhưng tên SP chưa có 'hủy' (yêu cầu 6)
@@ -632,6 +731,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     thead+="</tr></thead>";
     t.innerHTML=thead;
     const tb=el("tbody");
+    let pendingVatAnchor=null, pendingVatRemain=0;
 
     sh.rows.forEach(r=>{
       if(r.type==="daybreak"){
@@ -676,19 +776,44 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       });
       tb.appendChild(tr);
 
-      if(r.hasVatInfo){
-        const tr2=el("tr","vatinfo");
-        const parts=[];
-        if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
-        if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
-        if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
-        if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
-        tr2.innerHTML=`<td colspan="${cols.length}">↳ ${App._util.escapeHtml(parts.join("  |  "))}</td>`;
-        tb.appendChild(tr2);
+      // Dòng phụ VAT: nếu đơn này merge nhiều dòng, PHẢI chèn SAU dòng con cuối
+      // (không chèn giữa block merge -> sẽ phá rowspan, lệch dòng).
+      if(r.hasVatInfo && !r.orderIdHiddenByMerge){
+        const span = r.orderIdRowSpan||1;
+        if(span<=1){
+          tb.appendChild(App._vatRow(r,cols.length));   // đơn 1 dòng -> chèn ngay
+        } else {
+          r._pendingVatSpan = span-1;                    // còn span-1 dòng con nữa rồi mới chèn
+          r._pendingVat = true;
+        }
       }
+      // nếu đang chờ chèn VAT và đây là dòng con cuối của block -> chèn sau dòng con
+      if(pendingVatAnchor){
+        pendingVatRemain--;
+        if(pendingVatRemain<=0){
+          tb.appendChild(App._vatRow(pendingVatAnchor,cols.length));
+          pendingVatAnchor=null;
+        }
+      }
+      if(r._pendingVat){ pendingVatAnchor=r; pendingVatRemain=r._pendingVatSpan; }
     });
+    // nếu còn sót (block ở cuối bảng)
+    if(pendingVatAnchor) tb.appendChild(App._vatRow(pendingVatAnchor,cols.length));
     t.appendChild(tb);
     return t;
+  };
+
+  // tạo 1 dòng phụ thông tin xuất hóa đơn
+  App._vatRow=function(r,ncol){
+    const {isBlank,escapeHtml}=App._util;
+    const tr2=document.createElement("tr"); tr2.className="vatinfo";
+    const parts=[];
+    if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
+    if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
+    if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
+    if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
+    tr2.innerHTML=`<td colspan="${ncol}">↳ ${escapeHtml(parts.join("  |  "))}</td>`;
+    return tr2;
   };
 
   App._util.OUT_COLS_for=sh=>OUT_COLS.filter(c=>!(sh.isZalo&&c==="maVan"));
@@ -725,6 +850,21 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const merges=[];
     const rowMeta=["header"];
 
+    let pendVat=null, pendRemain=0; // hoãn dòng VAT đến sau dòng con cuối của đơn merge
+
+    const pushVat=(r)=>{
+      const parts=[];
+      if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
+      if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
+      if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
+      if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
+      const txt="↳ "+parts.join("   |   ");
+      const vrow=cols.map(()=> "");vrow[0]=txt;
+      const vrowH=cols.map(()=> "");vrowH[0]=App._util.escapeHtml(txt);
+      aoa.push(vrow);htmlMx.push(vrowH);rowMeta.push("vatinfo");
+      merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:cols.length-1}});
+    };
+
     sh.rows.forEach(r=>{
       if(r.type==="daybreak"){aoa.push(cols.map(()=> ""));htmlMx.push(cols.map(()=> ""));rowMeta.push("daybreak");return;}
       const slave = !!r.orderIdHiddenByMerge;  // dòng con của block merge mã (cả SHOPEE & ZALO)
@@ -755,19 +895,18 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         const ci=cols.indexOf("ngayDV");
         if(ci>=0) merges.push({s:{r:top,c:ci},e:{r:top+r.ngayDVRowSpan-1,c:ci}});
       }
-      if(r.hasVatInfo){
-        const parts=[];
-        if(!isBlank(r.raw.mst))parts.push("MST: "+r.raw.mst);
-        if(!isBlank(r.raw.tenMua))parts.push("Tên: "+r.raw.tenMua);
-        if(!isBlank(r.raw.diaChi))parts.push("Đ/c: "+r.raw.diaChi);
-        if(!isBlank(r.raw.email))parts.push("Email: "+r.raw.email);
-        const txt="↳ "+parts.join("   |   ");
-        const vrow=cols.map(()=> "");vrow[0]=txt;
-        const vrowH=cols.map(()=> "");vrowH[0]=App._util.escapeHtml(txt);
-        aoa.push(vrow);htmlMx.push(vrowH);rowMeta.push("vatinfo");
-        merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:cols.length-1}});
+
+      // dòng con cuối của block -> nếu có VAT đang chờ thì chèn SAU dòng này
+      if(pendVat){ pendRemain--; if(pendRemain<=0){ pushVat(pendVat); pendVat=null; } }
+
+      // đăng ký VAT: đơn 1 dòng -> chèn ngay; đơn merge -> chờ hết dòng con
+      if(r.hasVatInfo && !slave){
+        const span=r.orderIdRowSpan||1;
+        if(span<=1) pushVat(r);
+        else { pendVat=r; pendRemain=span-1; }
       }
     });
+    if(pendVat) pushVat(pendVat); // block ở cuối bảng
     return {cols,aoa,htmlMx,merges,rowMeta};
   }
   // giá trị text (Excel)
@@ -1025,15 +1164,16 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       const mergeRows={};
       (ws["!merges"]||[]).forEach(m=>{ if(m.e.r>m.s.r) mergeRows[m.s.r]=Math.max(mergeRows[m.s.r]||1,m.e.r-m.s.r+1); });
 
-      const esc=App._util.escapeHtml;
-      const rows=[]; let stt=0;
+      const esc=App._util.escapeHtml, cellHasNote=App._util.cellHasNote, norm=App._util.norm,
+            hasHuy=App._util.hasHuy, hasPhiHuy=App._util.hasPhiHuy;
+      const rows=[], warnings=[], emptyDates=[], cancelMismatch=[], cancelQtyMismatch=[];
+      let stt=0;
       for(let r=2;r<aoa.length;r++){
         const row=aoa[r]; if(!row)continue;
         const allEmpty=row.every(v=>String(v).trim()==="");
         if(String(row[0]).trim().startsWith("↳")){
           const prev=rows[rows.length-1];
           if(prev){prev.hasVatInfo=true;
-            // tách lại MST/Tên/Đc/Email từ dòng phụ
             const line=String(row[0]).replace(/^↳\s*/,"");
             line.split(/\s*\|\s*/).forEach(p=>{
               const mm=p.match(/^(MST|Tên|Đ\/c|Email):\s*(.*)$/i);
@@ -1051,21 +1191,46 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         const oid=String(g("orderId")), mv=String(g("maVan")), sp=String(g("sanPham"));
         const rec={type:"row",ri:r,raw:{
           ngayOrder:g("ngayOrder"),ngayDV:g("ngayDV"),sanPham:sp,mst:"",tenMua:"",diaChi:"",email:""},
-          html:{sanPham:esc(sp)},
+          html:{sanPham:esc(sp).replace(/\n/g,"<br>")},
           orderId:{full:oid,html:esc(oid).replace(/\n/g,"<br>")},
           maVan:{full:mv,html:esc(mv).replace(/\n/g,"<br>")},
           soLuong:num(g("soLuong")),donGiaGiam:num(g("donGiaGiam")),
           donGiaChuaVat:num(g("donGiaChuaVat"))
         };
         rec.isCancel=(rec.soLuong!=null&&rec.soLuong<0);
+
+        // PHÁT HIỆN LẠI: ô mã có chữ ghi chú
+        [["orderId",oid,"Mã Order ID"],["maVan",mv,"Mã Đơn Vận/Hàng"]].forEach(([k,v,lbl])=>{
+          if(v && cellHasNote(v))
+            warnings.push({ri:r, field:k, fieldLabel:lbl, full:v, keep:v});
+        });
+        // PHÁT HIỆN LẠI: mã có HỦY nhưng tên SP chưa có hủy
+        const codeHasHuy=hasHuy(oid+" "+mv);
+        const spHasHuy=hasHuy(sp);
+        if(codeHasHuy && !spHasHuy && sp.trim()!=="")
+          cancelMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,60), sanPham:sp, fixed:sp});
+        // PHÁT HIỆN LẠI: có chữ HỦY nhưng số lượng KHÔNG âm (loại "phí hủy")
+        const phiHuy=hasPhiHuy(oid+" "+mv+" "+sp);
+        if((codeHasHuy||spHasHuy) && !phiHuy && rec.soLuong!=null && rec.soLuong>=0)
+          cancelQtyMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,40),
+            sanPham:sp.slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
+        // PHÁT HIỆN LẠI: ngày order trống (bỏ qua dòng con merge)
+        const isSlaveRow = mergeRows[r]===undefined && (ci.orderId>=0 && String(g("orderId")).trim()==="" && (isZalo||String(g("maVan")).trim()===""));
+        if(String(g("ngayOrder")).trim()==="" && !isSlaveRow)
+          emptyDates.push({ri:r, ngayDV:rec.raw.ngayDV, sanPham:sp, fixed:""});
+
         if(mergeRows[r]){rec.orderIdRowSpan=mergeRows[r];rec.maVanRowSpan=mergeRows[r];}
-        stt++; rec.stt=ci.stt>=0&&g("stt")!==""?num(g("stt")):stt; rec.sttRowSpan=mergeRows[r]||1;
+        // STT: dòng con merge (ô mã trống do bị anchor phủ) -> không tăng
+        const isMergeChild = String(g("orderId")).trim()==="" && (isZalo? true : String(g("maVan")).trim()==="")
+                             && rows.length && rows[rows.length-1].type==="row";
+        if(isMergeChild && !mergeRows[r]){ rec.orderIdHiddenByMerge=true; rec.stt=null; }
+        else { stt++; rec.stt=(ci.stt>=0&&g("stt")!=="")?num(g("stt")):stt; rec.sttRowSpan=mergeRows[r]||1; }
         rows.push(rec);
       }
       // dọn daybreak thừa đầu/cuối
       while(rows.length && rows[0].type==="daybreak") rows.shift();
       while(rows.length && rows[rows.length-1].type==="daybreak") rows.pop();
-      const sh={title:name,kind,isZalo,month,rows,warnings:[],emptyDates:[],cancelMismatch:[],
+      const sh={title:name,kind,isZalo,month,rows,warnings,emptyDates,cancelMismatch,cancelQtyMismatch,
         missingChuaVat:false,colMap:{}};
       (byMonth[month]=byMonth[month]||[]).push(sh);
     });
@@ -1080,7 +1245,36 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.3.2</b> — (bản hiện tại)
+<b>v1.5.0</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>2 cột ngày giờ <b>gộp 1 ngày chung cho cả ĐƠN</b> (theo block merge của mã đơn vận /
+      order id). Nếu các dòng cùng ngày → lấy luôn; nếu <b>khác ngày</b> → lấy ngày hàng
+      trên cùng và <b>cảnh báo riêng từng cột</b> (Ngày Order / Ngày DV) để kiểm tra & sửa.</li>
+</ul>
+<b>v1.4.2</b>
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>bắt nhầm chữ "hủy"</b> trong các từ như "Thụy Sĩ", "Thủy", "khuyến",
+      "huyện". Giờ chỉ bắt "hủy" khi đứng RIÊNG thành một từ (ranh giới từ).</li>
+</ul>
+<b>v1.4.1</b>
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>dòng thông tin xuất hóa đơn (MST...) nhảy sai vị trí</b> khi đơn
+      merge nhiều dòng — giờ dòng MST nằm SAU cả block merge, không chen vào giữa
+      làm lệch dòng. (PDF, Excel, xem trước)</li>
+  <li>Sửa ô sửa mã (textarea) <b>bị che mất dòng dưới</b> — giờ cao đủ theo số dòng.</li>
+</ul>
+<b>v1.4.0</b>
+<ul style="margin:4px 0 10px">
+  <li>Thêm phát hiện <b>đơn ghi HỦY nhưng số lượng để DƯƠNG</b> (đơn hủy phải âm) —
+      liệt kê để sửa số lượng. Tự loại "phí hủy" (là dịch vụ, SL dương đúng).</li>
+</ul>
+<b>v1.3.3</b>
+<ul style="margin:4px 0 10px">
+  <li><b>Sửa lỗi mở lại file Excel</b>: giờ <b>phát hiện lại</b> các ô mã có chữ ghi chú,
+      đơn HỦY chưa khớp tên SP, và ngày order trống (trước import xong không thấy gì để sửa).
+      Đồng thời tính lại STT đúng theo đơn merge (không nhảy số ở dòng con).</li>
+</ul>
+<b>v1.3.2</b>
 <ul style="margin:4px 0 10px">
   <li><b>Sửa lỗi nút tải Excel không hoạt động</b>: thư viện Excel (xlsx-js-style)
       đổi sang CDN jsDelivr (cdnjs không có gói này) + fallback unpkg. Thêm thông báo
