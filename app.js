@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.4.1";
+const APP_VERSION = "1.5.0";
 
 const App = (() => {
   "use strict";
@@ -74,6 +74,12 @@ const App = (() => {
   const fmtNum = n => n==null?"":Math.round(n).toLocaleString("vi-VN");
   const el = (t,c,txt)=>{const e=document.createElement(t);if(c)e.className=c;if(txt!=null)e.textContent=txt;return e;};
   const escapeHtml = s => String(s==null?"":s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+
+  /* "hủy" ĐỨNG RIÊNG (ranh giới từ) — tránh bắt nhầm "thụy" (Thụy Sĩ), "khuy", "thủy"...
+     Sau norm: "thụy sĩ" -> "thuy si" (KHÔNG khớp \bhuy\b vì 'huy' dính 't' phía trước).
+     "HỦY ĐƠN" -> "huy don" (khớp). "hủy" -> "huy" (khớp).                       */
+  const hasHuy = s => /\bhuy\b/.test(norm(s));
+  const hasPhiHuy = s => /\bphi\s+huy\b/.test(norm(s)); // "phí hủy" là dịch vụ -> loại trừ
 
   /* ----- GIỮ ĐỊNH DẠNG GẠCH NGANG (strikethrough) + XUỐNG DÒNG ------------
      Google Sheets cho biết gạch ngang theo 2 cách:
@@ -263,6 +269,7 @@ const App = (() => {
       const emptyDates=[]; // ngày order trống -> review
       const cancelMismatch=[]; // mã có 'hủy' nhưng tên SP chưa có 'hủy'
       const cancelQtyMismatch=[]; // có 'hủy' nhưng số lượng KHÔNG âm
+      const dateMismatch=[]; // trong 1 đơn, ngày order/DV khác nhau -> lấy hàng trên + cảnh báo
       const getCell=(ri,key)=>{const c=colMap[key];return c==null?"":(rows[ri]?.[c]??"");};
       // lấy grid cell (để đọc định dạng gạch ngang)
       const getGridCell=(ri,key)=>{const c=colMap[key];if(c==null)return null;
@@ -337,8 +344,8 @@ const App = (() => {
 
         // ---- YÊU CẦU 6: ô mã có 'HỦY' nhưng tên SP CHƯA có 'hủy' -> cho sửa tên ----
         const codeText = (String(rec.raw.orderId||"")+" "+String(rec.raw.maVan||""));
-        const codeHasHuy = /h[ủu]y/i.test(norm(codeText)) || /huy/i.test(norm(codeText));
-        const spHasHuy = /huy/i.test(norm(rec.raw.sanPham||""));
+        const codeHasHuy = hasHuy(codeText);
+        const spHasHuy = hasHuy(rec.raw.sanPham||"");
         if(codeHasHuy && !spHasHuy && !isBlank(rec.raw.sanPham)){
           cancelMismatch.push({ri, code:codeText.trim().slice(0,60),
             sanPham:String(rec.raw.sanPham), fixed:String(rec.raw.sanPham)});
@@ -366,7 +373,7 @@ const App = (() => {
 
         // ---- PHÁT HIỆN: đơn HỦY (ở mã HOẶC tên SP) nhưng SỐ LƯỢNG KHÔNG ÂM ----
         // Loại "phí hủy" (là dịch vụ, SL dương đúng) -> chỉ bắt "hủy" thật sự là hủy đơn.
-        const phiHuy = /phi h[uủ]y|phi.{0,3}huy/i.test(norm(codeText+" "+rec.raw.sanPham));
+        const phiHuy = hasPhiHuy(codeText+" "+rec.raw.sanPham);
         const anyHuy = (codeHasHuy || spHasHuy) && !phiHuy;
         if(anyHuy && rec.soLuong!=null && rec.soLuong>=0){
           cancelQtyMismatch.push({ri, code:codeText.trim().slice(0,40),
@@ -400,12 +407,14 @@ const App = (() => {
           const oidHtml=r.orderId.html?[r.orderId.html]:[];
           const mvParts=r.maVan.full?[r.maVan.full]:[];
           const mvHtml=r.maVan.html?[r.maVan.html]:[];
+          const blockRows=[r];   // gồm anchor + các dòng con (để gộp ngày)
           for(let j=i+1;j<out.length && span<r.mergeTop;j++){
             const c=out[j]; if(c.type==="daybreak")continue;
             if(c.isMergedSlave){
               if(c.orderId.full){oidParts.push(c.orderId.full);oidHtml.push(c.orderId.html);}
               if(c.maVan.full){mvParts.push(c.maVan.full);mvHtml.push(c.maVan.html);}
               c.orderIdHiddenByMerge=true; span++;
+              blockRows.push(c);
             } else break;
           }
           r.orderId.full=oidParts.join("\n");
@@ -414,6 +423,29 @@ const App = (() => {
           r.maVan.html=mvHtml.filter(Boolean).join("<br>");
           r.orderIdRowSpan=span;   // số dòng thực sự gộp được
           r.maVanRowSpan=span;
+
+          // ---- GỘP NGÀY theo block ĐƠN (1 ngày chung cho cả đơn) ----
+          // Xét riêng từng cột (ngayOrder, ngayDV): nếu mọi hàng giống nhau -> lấy luôn;
+          // nếu khác nhau -> lấy hàng TRÊN CÙNG (anchor) + cảnh báo.
+          [["ngayOrder","Ngày Order"],["ngayDV","Ngày Cung Cấp DV"]].forEach(([key,lbl])=>{
+            const vals=blockRows.map(b=>String(b.raw[key]||"").trim());
+            const nonEmpty=vals.filter(v=>v!=="");
+            const uniq=[...new Set(nonEmpty)];
+            const chosen = vals[0]!=="" ? vals[0] : (nonEmpty[0]||""); // ưu tiên hàng trên cùng
+            // ép cả block dùng 1 ngày: anchor giữ ngày, dòng con -> slave (bị merge phủ)
+            r.raw[key]=chosen;
+            const spanKey = key==="ngayOrder" ? "ngayOrderRowSpan" : "ngayDVRowSpan";
+            const slaveKey= key==="ngayOrder" ? "ngayOrderSlave"   : "ngayDVSlave";
+            r[spanKey]=span; r[slaveKey]=false;
+            for(let k=1;k<blockRows.length;k++){ blockRows[k][slaveKey]=true; blockRows[k][spanKey]=1; }
+            // cảnh báo nếu trong đơn có >1 ngày khác nhau
+            if(uniq.length>1){
+              dateMismatch.push({ri:r.ri, col:key, colLabel:lbl,
+                values:uniq.join("  ≠  "), chosen, fixed:chosen,
+                ma:(r.maVan.full||r.orderId.full||"").split("\n")[0].slice(0,30)});
+              r[(key==="ngayOrder"?"ngayOrderConflict":"ngayDVConflict")]=true;
+            }
+          });
         }
       }
 
@@ -427,14 +459,14 @@ const App = (() => {
 
       return {
         title:tab.title, kind:tab.kind, isZalo, month:tab.month,
-        colMap, rows:out, warnings, emptyDates, cancelMismatch, cancelQtyMismatch,
+        colMap, rows:out, warnings, emptyDates, cancelMismatch, cancelQtyMismatch, dateMismatch,
         missingChuaVat: colMap.donGiaChuaVat==null
       };
     },
 
     /* render + export ở phần kế tiếp (app2.js nối vào) */
     _state:()=>state,
-    _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,cellHasNote,OUT_COLS,OUT_LABEL,APP_VERSION}
+    _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,cellHasNote,hasHuy,hasPhiHuy,OUT_COLS,OUT_LABEL,APP_VERSION}
   };
 })();
 
@@ -462,7 +494,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 
     st.months.forEach((mo,idx)=>{
       const warnCount=mo.sheets.reduce((a,s)=>a+s.warnings.length+s.emptyDates.length
-        +(s.cancelMismatch||[]).length+(s.cancelQtyMismatch||[]).length,0);
+        +(s.cancelMismatch||[]).length+(s.cancelQtyMismatch||[]).length+(s.dateMismatch||[]).length,0);
       const b=el("button",idx===st.current?"active":"","Tháng "+mo.month);
       if(warnCount){const bd=el("span","badge",warnCount);b.appendChild(bd);}
       b.onclick=()=>{st.current=idx;App._render();};
@@ -527,11 +559,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     }
 
     if(sh.warnings.length) box.appendChild(App._panelWarnings(sh));
+    if((sh.dateMismatch||[]).length) box.appendChild(App._panelDateMismatch(sh));
     if((sh.cancelQtyMismatch||[]).length) box.appendChild(App._panelCancelQty(sh));
     if((sh.cancelMismatch||[]).length) box.appendChild(App._panelCancel(sh));
     if(sh.emptyDates.length) box.appendChild(App._panelEmpty(sh));
     if(!sh.warnings.length && !sh.emptyDates.length && !(sh.cancelMismatch||[]).length
-       && !(sh.cancelQtyMismatch||[]).length){
+       && !(sh.cancelQtyMismatch||[]).length && !(sh.dateMismatch||[]).length){
       const ok=el("div","review");
       const head=el("div","review-head ok-h");
       head.innerHTML="<span>✓ Không phát hiện vấn đề cần sửa — tab này sạch</span>";
@@ -573,6 +606,29 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     rec[w.field].full = w.keep;
     rec[w.field].html = App._util.escapeHtml(w.keep).replace(/\n/g,"<br>");
     App._refreshPreview(sh);
+  };
+
+  // panel: trong 1 đơn merge, ngày (order/DV) các hàng KHÁC nhau -> đã lấy hàng trên, cho sửa
+  App._panelDateMismatch=function(sh){
+    const p=el("div","review");
+    const head=el("div","review-head warn-h");
+    head.innerHTML=`<span>📅 ${sh.dateMismatch.length} đơn có NGÀY khác nhau giữa các dòng — đã lấy ngày hàng trên cùng, kiểm tra & sửa nếu cần</span><span>▾</span>`;
+    head.onclick=()=>p.classList.toggle("collapsed");
+    const body=el("div","review-body");
+    const tbl=el("table","rv");
+    tbl.innerHTML="<thead><tr><th>Dòng</th><th>Mã</th><th>Cột</th><th>Các ngày khác nhau</th><th>Ngày dùng (sửa nếu cần)</th></tr></thead>";
+    const tb=el("tbody");
+    sh.dateMismatch.forEach(dm=>{
+      const tr=el("tr");
+      tr.innerHTML=`<td>${dm.ri+1}</td><td><span class="tag code">${App._util.escapeHtml(dm.ma)}</span></td>`+
+        `<td>${dm.colLabel}</td><td><span class="tag txt">${App._util.escapeHtml(dm.values)}</span></td>`;
+      const td=el("td");const inp=el("input");inp.type="text";inp.value=dm.fixed;inp.style.fontSize="12px";
+      inp.oninput=e=>{dm.fixed=e.target.value;const rec=sh.rows.find(r=>r.ri===dm.ri);
+        if(rec)rec.raw[dm.col]=e.target.value;App._refreshPreview(sh);};
+      td.appendChild(inp);tr.appendChild(td);tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);body.appendChild(tbl);p.appendChild(head);p.appendChild(body);
+    return p;
   };
 
   // panel: có chữ HỦY nhưng SỐ LƯỢNG không âm -> cho sửa số lượng
@@ -1108,7 +1164,8 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       const mergeRows={};
       (ws["!merges"]||[]).forEach(m=>{ if(m.e.r>m.s.r) mergeRows[m.s.r]=Math.max(mergeRows[m.s.r]||1,m.e.r-m.s.r+1); });
 
-      const esc=App._util.escapeHtml, cellHasNote=App._util.cellHasNote, norm=App._util.norm;
+      const esc=App._util.escapeHtml, cellHasNote=App._util.cellHasNote, norm=App._util.norm,
+            hasHuy=App._util.hasHuy, hasPhiHuy=App._util.hasPhiHuy;
       const rows=[], warnings=[], emptyDates=[], cancelMismatch=[], cancelQtyMismatch=[];
       let stt=0;
       for(let r=2;r<aoa.length;r++){
@@ -1148,12 +1205,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
             warnings.push({ri:r, field:k, fieldLabel:lbl, full:v, keep:v});
         });
         // PHÁT HIỆN LẠI: mã có HỦY nhưng tên SP chưa có hủy
-        const codeHasHuy=/huy/i.test(norm(oid+" "+mv));
-        const spHasHuy=/huy/i.test(norm(sp));
+        const codeHasHuy=hasHuy(oid+" "+mv);
+        const spHasHuy=hasHuy(sp);
         if(codeHasHuy && !spHasHuy && sp.trim()!=="")
           cancelMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,60), sanPham:sp, fixed:sp});
         // PHÁT HIỆN LẠI: có chữ HỦY nhưng số lượng KHÔNG âm (loại "phí hủy")
-        const phiHuy=/phi h[uủ]y|phi.{0,3}huy/i.test(norm(oid+" "+mv+" "+sp));
+        const phiHuy=hasPhiHuy(oid+" "+mv+" "+sp);
         if((codeHasHuy||spHasHuy) && !phiHuy && rec.soLuong!=null && rec.soLuong>=0)
           cancelQtyMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,40),
             sanPham:sp.slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
@@ -1188,7 +1245,18 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.4.1</b> — (bản hiện tại)
+<b>v1.5.0</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>2 cột ngày giờ <b>gộp 1 ngày chung cho cả ĐƠN</b> (theo block merge của mã đơn vận /
+      order id). Nếu các dòng cùng ngày → lấy luôn; nếu <b>khác ngày</b> → lấy ngày hàng
+      trên cùng và <b>cảnh báo riêng từng cột</b> (Ngày Order / Ngày DV) để kiểm tra & sửa.</li>
+</ul>
+<b>v1.4.2</b>
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>bắt nhầm chữ "hủy"</b> trong các từ như "Thụy Sĩ", "Thủy", "khuyến",
+      "huyện". Giờ chỉ bắt "hủy" khi đứng RIÊNG thành một từ (ranh giới từ).</li>
+</ul>
+<b>v1.4.1</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi <b>dòng thông tin xuất hóa đơn (MST...) nhảy sai vị trí</b> khi đơn
       merge nhiều dòng — giờ dòng MST nằm SAU cả block merge, không chen vào giữa
