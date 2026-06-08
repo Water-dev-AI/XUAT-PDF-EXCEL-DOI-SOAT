@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.6.2";
 
 const App = (() => {
   "use strict";
@@ -111,6 +111,13 @@ const App = (() => {
       html += (s.strike? "<s>"+part+"</s>" : part);
     });
     return html;
+  };
+  // true nếu ô CÓ gạch ngang (toàn bộ hoặc một phần) — để áp vào Excel (Excel chỉ strike cả ô)
+  const cellHasStrike = (cell) => {
+    if(!cell) return false;
+    if(cell.effectiveFormat?.textFormat?.strikethrough===true) return true;
+    const runs=cell.textFormatRuns;
+    return !!(runs && runs.some(r=>r.format?.strikethrough===true));
   };
 
   // giữ lại splitCodeText (không dùng để tách mã nữa, nhưng còn dùng nơi khác nếu cần)
@@ -319,12 +326,15 @@ const App = (() => {
           continue;
         }
 
-        const rec={type:"row", ri, raw:{}, html:{}};
+        const rec={type:"row", ri, raw:{}, html:{}, strike:{}};
         OUT_COLS.concat(["mst","tenMua","diaChi","email","_donGiaTruSim","_tongSimTrang"]).forEach(k=>{
           rec.raw[k]=getCell(ri,k);
         });
-        // HTML giữ gạch ngang cho các cột chữ
-        ["orderId","maVan","sanPham"].forEach(k=>{ rec.html[k]=richHtml(ri,k); });
+        // HTML giữ gạch ngang cho các cột chữ + cờ gạch (để áp vào Excel)
+        ["orderId","maVan","sanPham"].forEach(k=>{
+          rec.html[k]=richHtml(ri,k);
+          rec.strike[k]=cellHasStrike(getGridCell(ri,k));
+        });
 
         // ---- YÊU CẦU 4: GIỮ FULL TEXT mã, KHÔNG tách. ----
         // Chỉ cảnh báo khi ô có TOKEN KHÔNG PHẢI MÃ (chữ ghi chú, sđt, URL...).
@@ -867,6 +877,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const header=cols.map(c=>OUT_LABEL[c]);
     const aoa=[header];
     const htmlMx=[header.map(h=>App._util.escapeHtml(h))];
+    const strikeMx=[header.map(()=>false)]; // ô nào gạch ngang (cho Excel)
     const merges=[];
     const rowMeta=["header"];
 
@@ -881,22 +892,24 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       const txt="↳ "+parts.join("   |   ");
       const vrow=cols.map(()=> "");vrow[0]=txt;
       const vrowH=cols.map(()=> "");vrowH[0]=App._util.escapeHtml(txt);
-      aoa.push(vrow);htmlMx.push(vrowH);rowMeta.push("vatinfo");
+      aoa.push(vrow);htmlMx.push(vrowH);strikeMx.push(cols.map(()=>false));rowMeta.push("vatinfo");
       merges.push({s:{r:aoa.length-1,c:0},e:{r:aoa.length-1,c:cols.length-1}});
     };
 
     sh.rows.forEach(r=>{
-      if(r.type==="daybreak"){aoa.push(cols.map(()=> ""));htmlMx.push(cols.map(()=> ""));rowMeta.push("daybreak");return;}
+      if(r.type==="daybreak"){aoa.push(cols.map(()=> ""));htmlMx.push(cols.map(()=> ""));strikeMx.push(cols.map(()=>false));rowMeta.push("daybreak");return;}
       const slave = !!r.orderIdHiddenByMerge;  // dòng con của block merge mã (cả SHOPEE & ZALO)
       const line=cols.map(c=>cellVal(r,c,sh,slave));
       const lineH=cols.map(c=>cellHtml(r,c,sh,slave));
+      // cờ gạch ngang theo cột (chỉ các cột chữ có thể gạch)
+      const lineS=cols.map(c=>!!(r.strike&&r.strike[c]) && !(slave&&(c==="orderId"||c==="maVan"||c==="stt")));
       // 2 cột ngày: nếu là dòng con của merge ngày -> để trống (anchor sẽ rowspan)
       ["ngayOrder","ngayDV"].forEach(c=>{
         const ci=cols.indexOf(c); if(ci<0)return;
         const sl = c==="ngayOrder"?r.ngayOrderSlave:r.ngayDVSlave;
         if(sl){ line[ci]=""; lineH[ci]=""; }
       });
-      aoa.push(line);htmlMx.push(lineH);rowMeta.push(r.isCancel?"cancel":"data");
+      aoa.push(line);htmlMx.push(lineH);strikeMx.push(lineS);rowMeta.push(r.isCancel?"cancel":"data");
       const top=aoa.length-1;
 
       // merge cột mã theo đơn (STT + orderId + maVan)
@@ -927,7 +940,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       }
     });
     if(pendVat) pushVat(pendVat); // block ở cuối bảng
-    return {cols,aoa,htmlMx,merges,rowMeta};
+    return {cols,aoa,htmlMx,strikeMx,merges,rowMeta};
   }
   // giá trị text (Excel)
   function cellVal(r,c,sh,slave){
@@ -968,11 +981,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     mos.forEach(mo=>{
       const wb=XLSX.utils.book_new();
       mo.sheets.forEach(sh=>{
-        const {cols,aoa,merges,rowMeta}=sheetMatrix(sh);
+        const {cols,aoa,strikeMx,merges,rowMeta}=sheetMatrix(sh);
         const title=titleFor(mo);
         // chèn dòng tiêu đề lớn (đẩy mọi thứ xuống 1 dòng)
         const data=[cols.map((_,i)=> i===0?title:"")].concat(aoa);
         const meta=["title"].concat(rowMeta);
+        const strikeData=[cols.map(()=>false)].concat(strikeMx); // song song data
 
         const ws={};
         const moneyCols=new Set([cols.indexOf("soLuong"),cols.indexOf("donGiaGiam"),cols.indexOf("donGiaChuaVat")]);
@@ -999,6 +1013,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
             else if(m==="cancel"){st.fill={fgColor:{rgb:"FDECEA"}};}
             if(isMoney&&m!=="title"&&m!=="header") st.alignment={...st.alignment,horizontal:"right"};
             if(isStt&&m!=="title"&&m!=="header") st.alignment={...st.alignment,horizontal:"center"};
+            // gạch ngang: nếu ô gốc có strikethrough -> set vào font (Excel strike cả ô)
+            if(strikeData[r] && strikeData[r][c]){
+              st.font = Object.assign({}, st.font, {strike:true});
+            }
             cell.s=st;
             ws[addr]=cell;
           }
@@ -1267,16 +1285,19 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.6.1</b> — (bản hiện tại)
+<b>v1.6.2</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>File Excel xuất ra giờ <b>giữ chữ gạch ngang</b> (strikethrough) như Google Sheet
+      và bản PDF. (Excel áp gạch cho cả ô; nếu ô chỉ gạch một phần thì cả ô được gạch.)</li>
+</ul>
+<b>v1.6.1</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi <b>file Excel không mở được</b> ở v1.6.0: bỏ chèn số trang vào Excel
       (cách hậu xử lý làm hỏng file). Excel trở lại bình thường. <b>PDF vẫn có số trang.</b></li>
 </ul>
 <b>v1.6.0</b>
 <ul style="margin:4px 0 10px">
-  <li>Thêm <b>đánh số trang</b> cho cả PDF và Excel.
-      PDF: "Trang X / Y" ở chân mỗi trang (khi Save as PDF). Excel: footer "Trang X / Y"
-      hiện khi in / xem Print Preview.</li>
+  <li>Thêm <b>đánh số trang</b> cho PDF ("Trang X / Y" ở chân mỗi trang khi Save as PDF).</li>
 </ul>
 <b>v1.5.1</b>
 <ul style="margin:4px 0 10px">
