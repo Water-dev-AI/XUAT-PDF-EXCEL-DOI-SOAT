@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.5.1";
 
 const App = (() => {
   "use strict";
@@ -117,18 +117,38 @@ const App = (() => {
   const splitCodeText = raw => ({codes:[String(raw||"").trim()].filter(Boolean), text:""});
 
   /* ----- NHẬN DIỆN MÃ HỢP LỆ vs GHI CHÚ -----------------------------------
-     1 token là MÃ nếu khớp các dạng: b00..., SPXVN..., SPEVN..., SHOPEE...,
-     CX/CO/CN...VN, hoặc chuỗi chữ-HOA+số dài (vd 250723UUC77M84, G84NE7Q4).
-     Ô CHỈ gồm các mã (nhiều dòng cũng được) -> KHÔNG phải ghi chú.
-     Ô có token KHÔNG phải mã (chữ tiếng Việt: HỦY/ĐỔI..., số đt, URL) -> ghi chú. */
+     Mã vận đơn rất đa dạng tùy hãng (GHTK, SPX, VNPost, J&T, ...). Thay vì liệt kê
+     hết, ta nhận diện theo ĐẶC TRƯNG: chuỗi LIỀN (không khoảng trắng), gồm chữ cái
+     không dấu + có thể có số, đủ dài, KHÔNG phải từ tiếng Việt thường.
+     Ví dụ mã: b0000262..., SPXVN..., GYFQDLCG, VN267806333642L, EO378709847VN, G84NE7Q4
+     Ví dụ ghi chú: HỦY, ĐỔI, CHỜ, NGÀY, 4/4, 091..., https://...                 */
+  const COMMON_WORDS = new Set([ // từ thường hay gặp trong ghi chú (đã bỏ dấu)
+    "huy","doi","cho","loi","note","con","chua","ngay","don","sim","esim","thuong",
+    "phi","dich","vu","sang","trong","track","https","http","va","cua","khach","da",
+    "moi","cu","so","luong","trang","trắng","xu","ly","de","cho","gui","nhan"]);
   const isCodeToken = tok => {
     const t = tok.trim();
-    if (t==="") return true;            // token rỗng (do nhiều khoảng trắng) -> bỏ qua
-    if (t.length < 5) return false;
+    if (t==="") return true;            // token rỗng -> bỏ qua
+    if (/[\/:?=]/.test(t)) return false;            // có / : ? = -> URL/ngày -> ghi chú
+    if (/^\d{1,2}\/\d{1,2}/.test(t)) return false;  // dạng ngày 4/4
+    if (/^0\d{8,11}$/.test(t)) return false;        // số điện thoại
+    // có dấu tiếng Việt -> chắc chắn là chữ ghi chú, không phải mã
+    if (/[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]/i.test(t)) return false;
+    // tiền tố mã đã biết
     if (/^b0\d{6,}$/i.test(t)) return true;                       // order id b00...
-    if (/^(spxvn|spevn|shopee|shopeevtp)\w+$/i.test(t)) return true; // mã vận shopee
-    if (/^[a-z]{2}\d{6,}vn$/i.test(t)) return true;               // CX/CO/CN...VN
-    if (/^[a-z0-9]{6,}$/i.test(t) && /\d/.test(t)) return true;   // mã hỗn hợp chữ-số (250..., G84...)
+    if (/^(spxvn|spevn|shopee|shopeevtp)\w+$/i.test(t)) return true;
+    // ĐẶC TRƯNG mã vận: chuỗi liền chữ-số (in hoa/hỗn hợp), >=7 ký tự
+    //  - có ít nhất 1 số  HOẶC  toàn chữ HOA (vd GYFQDLCG)
+    if (/^[a-z0-9]{7,}$/i.test(t)){
+      const hasDigit=/\d/.test(t);
+      const allUpperLetters=/^[A-Z]+$/.test(t);
+      if(hasDigit || allUpperLetters) {
+        // loại trừ nếu (sau khi bỏ phân biệt hoa/thường) là từ tiếng Việt thường
+        if(!COMMON_WORDS.has(t.toLowerCase())) return true;
+      }
+    }
+    // mã chữ-số ngắn hơn (6) nhưng có cả chữ HOA và số (vd G84NE7Q4 = 8; G8NW3R6W)
+    if (/^[A-Z0-9]{6,}$/.test(t) && /[A-Z]/.test(t) && /\d/.test(t)) return true;
     return false;
   };
   // true nếu ô CÓ ghi chú (ít nhất 1 token không phải mã)
@@ -1245,7 +1265,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.5.0</b> — (bản hiện tại)
+<b>v1.5.1</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Nhận diện <b>nhiều dạng mã vận đơn hơn</b> (mã chữ HOA thuần như GYFQDLCG,
+      mã kiểu VN...L, EO...VN, tùy hãng vận chuyển) — không còn bị coi nhầm là text thừa.</li>
+</ul>
+<b>v1.5.0</b>
 <ul style="margin:4px 0 10px">
   <li>2 cột ngày giờ <b>gộp 1 ngày chung cho cả ĐƠN</b> (theo block merge của mã đơn vận /
       order id). Nếu các dòng cùng ngày → lấy luôn; nếu <b>khác ngày</b> → lấy ngày hàng
