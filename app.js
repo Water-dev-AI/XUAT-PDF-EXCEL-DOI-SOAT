@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.6.1";
 
 const App = (() => {
   "use strict";
@@ -952,28 +952,6 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     return App._util.escapeHtml(r.raw[c]??"");
   }
 
-  /* Chèn footer "Trang X / Y" vào mỗi sheet của file xlsx (SheetJS community không
-     hỗ trợ headerFooter qua API). Dùng fflate giải nén -> sửa XML -> nén lại.
-     Nếu fflate không có (CDN lỗi) -> trả nguyên file, không có số trang nhưng vẫn tải được. */
-  function addFooterToXlsx(u8){
-    try{
-      const F = (typeof fflate!=="undefined") ? fflate : null;
-      if(!F) return u8;
-      const files=F.unzipSync(u8);
-      Object.keys(files).forEach(name=>{
-        if(/^xl\/worksheets\/sheet\d+\.xml$/.test(name)){
-          let xml=F.strFromU8(files[name]);
-          if(!/headerFooter/.test(xml)){
-            const hf='<headerFooter><oddFooter>&amp;CTrang &amp;P / &amp;N</oddFooter></headerFooter>';
-            xml=xml.replace('</worksheet>', hf+'</worksheet>');
-            files[name]=F.strToU8(xml);
-          }
-        }
-      });
-      return F.zipSync(files);
-    }catch(e){ console.warn("addFooterToXlsx bỏ qua:",e); return u8; }
-  }
-
   /* ---------- EXCEL (có style: màu nền, viền, số thật) ---------- */
   const BORDER={top:{style:"thin",color:{rgb:"BBBBBB"}},bottom:{style:"thin",color:{rgb:"BBBBBB"}},
                 left:{style:"thin",color:{rgb:"BBBBBB"}},right:{style:"thin",color:{rgb:"BBBBBB"}}};
@@ -1036,14 +1014,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         XLSX.utils.book_append_sheet(wb,ws,("T"+mo.month+" "+sh.kind).slice(0,31));
       });
       const yr=(titleFor(mo).match(/20\d{2}/)||["20XX"])[0];
-      const fname=`Doi-soat_T${mo.month}_${yr}.xlsx`;
-      let u8=XLSX.write(wb,{type:"array",bookType:"xlsx"});
-      u8=addFooterToXlsx(new Uint8Array(u8));   // chèn số trang vào footer mỗi sheet
-      const blob=new Blob([u8],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
-      const a=document.createElement("a");
-      a.href=URL.createObjectURL(blob); a.download=fname;
-      document.body.appendChild(a); a.click();
-      setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},1000);
+      XLSX.writeFile(wb,`Doi-soat_T${mo.month}_${yr}.xlsx`);
     });
     }catch(err){
       alert("Lỗi khi tạo Excel: "+(err&&err.message?err.message:err));
@@ -1296,7 +1267,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.6.0</b> — (bản hiện tại)
+<b>v1.6.1</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>file Excel không mở được</b> ở v1.6.0: bỏ chèn số trang vào Excel
+      (cách hậu xử lý làm hỏng file). Excel trở lại bình thường. <b>PDF vẫn có số trang.</b></li>
+</ul>
+<b>v1.6.0</b>
 <ul style="margin:4px 0 10px">
   <li>Thêm <b>đánh số trang</b> cho cả PDF và Excel.
       PDF: "Trang X / Y" ở chân mỗi trang (khi Save as PDF). Excel: footer "Trang X / Y"
