@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.6.2";
+const APP_VERSION = "1.6.3";
 
 const App = (() => {
   "use strict";
@@ -1285,7 +1285,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.6.2</b> — (bản hiện tại)
+<b>v1.6.3</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>danh sách cảnh báo bị cắt</b>: khi có nhiều ô cần sửa (vd 25 ô),
+      các ô phía dưới bị che mất. Giờ panel mở hết toàn bộ, hiện đủ tất cả ô.</li>
+</ul>
+<b>v1.6.2</b>
 <ul style="margin:4px 0 10px">
   <li>File Excel xuất ra giờ <b>giữ chữ gạch ngang</b> (strikethrough) như Google Sheet
       và bản PDF. (Excel áp gạch cho cả ô; nếu ô chỉ gạch một phần thì cả ô được gạch.)</li>
