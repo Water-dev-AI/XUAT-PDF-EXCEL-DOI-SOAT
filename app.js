@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.1";
+const APP_VERSION = "1.7.2";
 
 const App = (() => {
   "use strict";
@@ -241,8 +241,12 @@ const App = (() => {
           const vals = grid.map(rd=>(rd.values||[]).map(c=>c?.formattedValue??""));
           // bỏ hàng trống cuối
           let last=0; for(let i=0;i<vals.length;i++) if(vals[i].some(v=>v.trim()!=="")) last=i;
-          const rows = vals.slice(0, last+1);
+          let rows = vals.slice(0, last+1);
           if(rows.length>1){
+            // cắt CỘT trống thừa bên phải: cột cuối có header hoặc bất kỳ data nào
+            let lastCol=0;
+            rows.forEach(r=>{ for(let c=0;c<r.length;c++) if(String(r[c]).trim()!=="") lastCol=Math.max(lastCol,c); });
+            rows = rows.map(r=>r.slice(0, lastCol+1));
             state.huyDoi = {title:huyDoiTab.title, header:rows[0], data:rows.slice(1), grid};
           }
         }
@@ -518,6 +522,7 @@ const App = (() => {
     _util:{norm,num,fmtNum,isBlank,el,escapeHtml,richCellHtml,cellHasNote,hasHuy,hasPhiHuy,OUT_COLS,OUT_LABEL,APP_VERSION}
   };
 })();
+if(typeof window!=="undefined") window.App = App;
 
 // nạp API key đã lưu
 try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("apiKey").value=k;
@@ -566,6 +571,8 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     }
 
     // tab HỦY/ĐỔI (nếu có) — đặt cuối cùng sau tháng 12
+    const grpMonth=document.querySelector(".btn-grp-month");
+    const grpHD=document.querySelector(".btn-grp-huydoi");
     if(st.huyDoi){
       const hdi=-1; // special index
       const b=el("button",st.current===hdi?"active":"","HỦY/ĐỔI");
@@ -577,11 +584,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         block.appendChild(App._renderHuyDoi(st.huyDoi));
         cont.appendChild(block);
         document.getElementById("exportSummary").innerHTML=
-          `<span class="pill" style="background:#fde0dd;color:#b00020">HỦY/ĐỔI <b>${st.huyDoi.data.length}</b> dòng</span>`+
-          `<button class="btn-ghost" onclick="App.exportHuyDoiPDF()" style="margin-left:12px">🖨 PDF HỦY/ĐỔI</button>`+
-          `<button class="btn-ghost" onclick="App.exportHuyDoiExcel()" style="margin-left:6px">⬇ Excel HỦY/ĐỔI</button>`;
+          `<span class="pill" style="background:#fde0dd;color:#b00020">HỦY/ĐỔI <b>${st.huyDoi.data.length}</b> dòng</span>`;
       }
     }
+    // bật/tắt nhóm nút theo tab đang xem
+    const onHD = (st.current<0);
+    if(grpMonth) grpMonth.style.display = onHD ? "none" : "";
+    if(grpHD)    grpHD.style.display    = onHD ? "" : "none";
   };
 
   // render bảng HỦY/ĐỔI nguyên bản (chỉ xem, không sửa)
@@ -603,7 +612,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       row.forEach((v,ci)=>{
         const td=document.createElement("td");
         td.innerHTML=App._util.escapeHtml(String(v)).replace(/\n/g,"<br>");
-        if(ci>=7) td.className="num"; // SỐ LƯỢNG, ĐƠN GIÁ
+        if(ci===7||ci===8) td.className="num"; // chỉ SỐ LƯỢNG, ĐƠN GIÁ căn phải
         tr.appendChild(td);
       });
       // pad nếu row ngắn hơn header
@@ -1446,7 +1455,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.1</b> — (bản hiện tại)
+<b>v1.7.2</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Tab HỦY/ĐỔI: sửa nút <b>PDF/Excel HỦY/ĐỔI hoạt động</b>; <b>ẩn các nút tháng</b>
+      (Excel tháng này, PDF SHOPEE/ZALO) khi ở tab này; <b>cắt cột trống thừa</b> bên phải;
+      cột LÝ DO <b>căn trái</b>.</li>
+</ul>
+<b>v1.7.1</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi <b>tab HỦY/ĐỔI không hiện</b>: bấm vào tab bị lỗi JS (crash khi
       tìm tháng ở index -1). Giờ hiện đúng bảng + nút export.</li>

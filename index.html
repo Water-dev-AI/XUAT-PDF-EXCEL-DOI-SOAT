@@ -197,15 +197,21 @@
 <!-- thanh xuất file dính đáy, ẩn ban đầu -->
 <div class="export-bar" id="exportBar" style="display:none">
   <div class="grow" id="exportSummary"></div>
-  <button class="btn-ghost" onclick="App.exportExcel('current')">⬇ Excel (tháng này)</button>
-  <button class="btn-ghost" onclick="App.exportPDF('current','SHOPEE')">🖨 PDF SHOPEE</button>
-  <button class="btn-ghost" onclick="App.exportPDF('current','ZALO')">🖨 PDF ZALO</button>
-  <button class="btn-ok" onclick="App.exportExcel('all')">⬇ Excel (tất cả)</button>
-  <button class="btn-ok" onclick="App.exportPDF('all','SHOPEE')">🖨 PDF SHOPEE (tất cả)</button>
-  <button class="btn-ok" onclick="App.exportPDF('all','ZALO')">🖨 PDF ZALO (tất cả)</button>
+  <span class="btn-grp-month">
+    <button class="btn-ghost" onclick="App.exportExcel('current')">⬇ Excel (tháng này)</button>
+    <button class="btn-ghost" onclick="App.exportPDF('current','SHOPEE')">🖨 PDF SHOPEE</button>
+    <button class="btn-ghost" onclick="App.exportPDF('current','ZALO')">🖨 PDF ZALO</button>
+    <button class="btn-ok" onclick="App.exportExcel('all')">⬇ Excel (tất cả)</button>
+    <button class="btn-ok" onclick="App.exportPDF('all','SHOPEE')">🖨 PDF SHOPEE (tất cả)</button>
+    <button class="btn-ok" onclick="App.exportPDF('all','ZALO')">🖨 PDF ZALO (tất cả)</button>
+  </span>
+  <span class="btn-grp-huydoi" style="display:none">
+    <button class="btn-ghost" onclick="App.exportHuyDoiPDF()">🖨 PDF HỦY/ĐỔI</button>
+    <button class="btn-ok" onclick="App.exportHuyDoiExcel()">⬇ Excel HỦY/ĐỔI</button>
+  </span>
 </div>
 
-<script src="app.js?v=1.7.1"></script>
+<script src="app.js?v=1.7.2"></script>
 <script>
   try{
     if(typeof APP_VERSION!=="undefined"){
