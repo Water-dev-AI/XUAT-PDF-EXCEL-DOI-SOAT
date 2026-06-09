@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.6.3";
+const APP_VERSION = "1.7.0";
 
 const App = (() => {
   "use strict";
@@ -206,10 +206,15 @@ const App = (() => {
 
         // chỉ giữ tab dạng "T<số> SHOPEE" / "T<số> ZALO"
         const valid=[];
+        let huyDoiTab=null; // tab đặc biệt "HỦY/ĐỔI"
         (data.sheets||[]).forEach(s=>{
           const title=s.properties.title;
           const mt=title.match(/^\s*T\s*(\d{1,2})\s+(SHOPEE|ZALO)\s*$/i);
           if(mt) valid.push({title, month:+mt[1], kind:mt[2].toUpperCase(), raw:s});
+          // nhận tab HỦY/ĐỔI: tên chứa cả "hủy" lẫn "đổi" (hoặc tên chứa emoji ⭕)
+          else if(/h[ủu]y/i.test(title) && /[đd][ổo]i/i.test(title)){
+            huyDoiTab={title, raw:s};
+          }
         });
 
         if(!valid.length){
@@ -228,6 +233,20 @@ const App = (() => {
 
         state.months = App._buildMonths(valid);
         state.current = 0;
+
+        // Parse tab HỦY/ĐỔI (nếu có): giữ nguyên bản gốc, không sửa
+        state.huyDoi = null;
+        if(huyDoiTab){
+          const grid = huyDoiTab.raw.data?.[0]?.rowData||[];
+          const vals = grid.map(rd=>(rd.values||[]).map(c=>c?.formattedValue??""));
+          // bỏ hàng trống cuối
+          let last=0; for(let i=0;i<vals.length;i++) if(vals[i].some(v=>v.trim()!=="")) last=i;
+          const rows = vals.slice(0, last+1);
+          if(rows.length>1){
+            state.huyDoi = {title:huyDoiTab.title, header:rows[0], data:rows.slice(1), grid};
+          }
+        }
+
         App._render();
         show("good",`Đã đọc xong: ${valid.length} tab, gộp thành ${state.months.length} tháng. `+
           `Kiểm tra các mục cảnh báo bên dưới rồi xuất file.`);
@@ -543,6 +562,54 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       `<span class="pill">Tháng <b>${mo.month}</b></span>`+
       mo.sheets.map(s=>`<span class="pill">${s.kind} <b>${s.rows.filter(r=>r.type==="row").length}</b> dòng</span>`).join("")+
       `<span class="pill">Tổng <b>${totalRows}</b> dòng</span>`;
+
+    // tab HỦY/ĐỔI (nếu có) — đặt cuối cùng sau tháng 12
+    if(st.huyDoi){
+      const hdi=-1; // special index
+      const b=el("button",st.current===hdi?"active":"","HỦY/ĐỔI");
+      b.style.cssText="background:#fde0dd;color:#b00020;font-weight:700";
+      b.onclick=()=>{st.current=hdi;App._render();};
+      tb.appendChild(b);
+      if(st.current===hdi){
+        const block=el("div","month-block active");
+        block.appendChild(App._renderHuyDoi(st.huyDoi));
+        cont.appendChild(block);
+        document.getElementById("exportSummary").innerHTML=
+          `<span class="pill" style="background:#fde0dd;color:#b00020">HỦY/ĐỔI <b>${st.huyDoi.data.length}</b> dòng</span>`+
+          `<button class="btn-ghost" onclick="App.exportHuyDoiPDF()" style="margin-left:12px">🖨 PDF HỦY/ĐỔI</button>`+
+          `<button class="btn-ghost" onclick="App.exportHuyDoiExcel()" style="margin-left:6px">⬇ Excel HỦY/ĐỔI</button>`;
+      }
+    }
+  };
+
+  // render bảng HỦY/ĐỔI nguyên bản (chỉ xem, không sửa)
+  App._renderHuyDoi=function(hd){
+    const box=el("div");
+    const h=el("div");h.style.cssText="font-size:14px;font-weight:700;margin:6px 0 12px;color:#b00020";
+    h.textContent="▸ "+hd.title+" — xuất nguyên bản, không điều chỉnh";
+    box.appendChild(h);
+
+    const wrap=el("div","preview-scroll");
+    const t=el("table","pv");
+    let thead="<thead><tr>";
+    hd.header.forEach(h=>thead+=`<th>${App._util.escapeHtml(h).replace(/\n/g,"<br>")}</th>`);
+    thead+="</tr></thead>"; t.innerHTML=thead;
+    const tb=document.createElement("tbody");
+    hd.data.forEach(row=>{
+      if(row.every(v=>String(v).trim()==="")) return;
+      const tr=document.createElement("tr");
+      row.forEach((v,ci)=>{
+        const td=document.createElement("td");
+        td.innerHTML=App._util.escapeHtml(String(v)).replace(/\n/g,"<br>");
+        if(ci>=7) td.className="num"; // SỐ LƯỢNG, ĐƠN GIÁ
+        tr.appendChild(td);
+      });
+      // pad nếu row ngắn hơn header
+      for(let i=row.length;i<hd.header.length;i++){tr.appendChild(document.createElement("td"));}
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
+    return box;
   };
 
   App._renderSheet=function(mo,sh){
@@ -1177,6 +1244,96 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     fr.readAsArrayBuffer(file);
   }
 
+  // ========== EXPORT TAB HỦY/ĐỔI (nguyên bản) ==========
+
+  function huyDoiYear(){
+    const st=S(); const hd=st.huyDoi; if(!hd)return "20XX";
+    // suy từ dòng đầu cột NGÀY
+    for(const row of hd.data){const d=String(row[0]||"");const m=d.match(/(20\d{2})/);if(m)return m[1];}
+    // hoặc từ state.months
+    for(const mo of st.months){const t=titleFor(mo);const m2=t.match(/(20\d{2})/);if(m2)return m2[1];}
+    return "20XX";
+  }
+  function huyDoiTitle(){return "ĐIỀU CHỈNH HỦY/ĐỔI NĂM "+huyDoiYear();}
+
+  App.exportHuyDoiPDF=function(){
+    const hd=S().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
+    const esc=s=>String(s==null?"":s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+    const ncol=hd.header.length;
+    // tính tỷ lệ độ rộng cột: ĐƠN GIÁ/SL hẹp, LÝ DO rộng
+    const cw=[8,14,14,6,14,14,20,5,7,24]; // ~ tương ứng 10 cột
+    const totalW=cw.slice(0,ncol).reduce((a,b)=>a+b,0);
+    let html=`<html><head><meta charset="utf-8"><title>${huyDoiTitle()}</title><style>
+      @page{size:A4 landscape;margin:8mm 8mm 12mm 8mm;
+        @bottom-center{content:"Trang " counter(page) " / " counter(pages);
+          font-family:"Times New Roman",serif;font-size:8pt;color:#555}}
+      *{box-sizing:border-box}body{font-family:"Times New Roman",serif;color:#000;margin:0;padding:0}
+      .title{text-align:center;font-size:13pt;font-weight:bold;margin:0 0 8px}
+      table{border-collapse:collapse;width:100%;table-layout:fixed}
+      th,td{border:0.6pt solid #333;padding:2.5px 3px;font-size:6.8pt;word-wrap:break-word;
+        overflow-wrap:break-word;vertical-align:middle;line-height:1.2}
+      th{background:#0c1c33 !important;color:#fff !important;font-weight:bold;text-align:center;
+        -webkit-print-color-adjust:exact;print-color-adjust:exact}
+      td.num{text-align:right;font-variant-numeric:tabular-nums}
+      tr{page-break-inside:avoid}thead{display:table-header-group}
+      .spoken-word,[class*="spoken-word"],[id*="biread"]{display:none!important}
+    </style></head><body>`;
+    html+=`<div class="title">${esc(huyDoiTitle())}</div>`;
+    html+="<table><colgroup>"+hd.header.map((_,i)=>`<col style="width:${((cw[i]||10)/totalW*100).toFixed(1)}%">`).join("")+"</colgroup>";
+    html+="<thead><tr>"+hd.header.map(h=>`<th>${esc(h).replace(/\n/g,"<br>")}</th>`).join("")+"</tr></thead><tbody>";
+    hd.data.forEach(row=>{
+      if(row.every(v=>String(v).trim()===""))return;
+      html+="<tr>";
+      for(let i=0;i<ncol;i++){
+        const v=row[i]!=null?row[i]:"";
+        const isNum=(i>=7&&i<=8);
+        html+=`<td class="${isNum?'num':''}">${esc(String(v)).replace(/\n/g,"<br>")}</td>`;
+      }
+      html+="</tr>";
+    });
+    html+="</tbody></table></body></html>";
+    const w=window.open("","_printHD"+Date.now());
+    if(!w){alert("Trình duyệt chặn pop-up. Cho phép rồi thử lại.");return;}
+    w.document.write(html);w.document.close();
+    const cleanExt=()=>{try{w.document.querySelectorAll('.spoken-word,[class*="spoken-word"],[id*="biread"]').forEach(n=>n.remove());}catch(e){}};
+    w.onload=()=>{cleanExt();setTimeout(()=>{cleanExt();w.print();},350);};
+  };
+
+  App.exportHuyDoiExcel=function(){
+    const hd=S().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
+    if(typeof XLSX==="undefined"){alert("Thư viện Excel chưa tải. Tải lại trang.");return;}
+    try{
+    const wb=XLSX.utils.book_new();
+    const aoa=[[huyDoiTitle(),...hd.header.slice(1).map(()=>"")]].concat([hd.header]).concat(hd.data.filter(r=>r.some(v=>String(v).trim()!=="")));
+    const ws={};
+    const BORDER={top:{style:"thin"},bottom:{style:"thin"},left:{style:"thin"},right:{style:"thin"}};
+    const ncol=hd.header.length;
+    const range={s:{r:0,c:0},e:{r:aoa.length-1,c:ncol-1}};
+    for(let r=0;r<aoa.length;r++){
+      for(let c=0;c<ncol;c++){
+        const addr=XLSX.utils.encode_cell({r,c});
+        const v=aoa[r][c]!=null?aoa[r][c]:"";
+        const cell={t:"s",v:String(v)};
+        const st={border:BORDER,alignment:{vertical:"center",wrapText:true}};
+        if(r===0){st.font={bold:true,sz:13};st.alignment={horizontal:"center",vertical:"center"};delete st.border;}
+        else if(r===1){st.font={bold:true,color:{rgb:"FFFFFF"},sz:9};
+          st.fill={fgColor:{rgb:"10243F"}};st.alignment={horizontal:"center",vertical:"center",wrapText:true};}
+        else if(c>=7&&c<=8&&v!==""&&!isNaN(Number(String(v).replace(/[.,\s]/g,"")))){
+          const n=parseFloat(String(v).replace(/[^\d.\-]/g,"")); if(!isNaN(n)){cell.t="n";cell.v=n;cell.z="#,##0";}
+          st.alignment={...st.alignment,horizontal:"right"};
+        }
+        cell.s=st; ws[addr]=cell;
+      }
+    }
+    ws["!ref"]=XLSX.utils.encode_range(range);
+    ws["!cols"]=hd.header.map((_,i)=>({wch:[10,22,22,8,22,22,36,7,11,40][i]||12}));
+    ws["!merges"]=[{s:{r:0,c:0},e:{r:0,c:ncol-1}}];
+    XLSX.utils.book_append_sheet(wb,ws,"HỦY ĐỔI");
+    const yr=huyDoiYear();
+    XLSX.writeFile(wb,`Dieu-chinh_Huy-Doi_${yr}.xlsx`);
+    }catch(err){alert("Lỗi xuất Excel HỦY/ĐỔI: "+(err.message||err));}
+  };
+
   // dựng state.months từ workbook đã xuất (cấu trúc cố định: r0 title, r1 header, r2+ data)
   App._monthsFromWorkbook=function(wb){
     const {num}=App._util;
@@ -1285,10 +1442,15 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.6.3</b> — (bản hiện tại)
+<b>v1.7.0</b> — (bản hiện tại)
 <ul style="margin:4px 0 10px">
-  <li>Sửa lỗi <b>danh sách cảnh báo bị cắt</b>: khi có nhiều ô cần sửa (vd 25 ô),
-      các ô phía dưới bị che mất. Giờ panel mở hết toàn bộ, hiện đủ tất cả ô.</li>
+  <li>Hỗ trợ tab <b>"⭕HỦY/ĐỔI SHOPEE/ZALO⭕"</b>: nhận diện tự động, hiện tab riêng
+      cuối cùng (sau T12). Xuất <b>PDF + Excel nguyên bản</b> (không điều chỉnh gì),
+      tiêu đề "ĐIỀU CHỈNH HỦY/ĐỔI NĂM 20XX", khổ ngang, header lặp lại các trang.</li>
+</ul>
+<b>v1.6.3</b>
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi danh sách cảnh báo bị cắt (25 ô chỉ hiện ~13).</li>
 </ul>
 <b>v1.6.2</b>
 <ul style="margin:4px 0 10px">
