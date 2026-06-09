@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.2";
+const APP_VERSION = "1.7.3";
 
 const App = (() => {
   "use strict";
@@ -1260,17 +1260,20 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
   // ========== EXPORT TAB HỦY/ĐỔI (nguyên bản) ==========
 
   function huyDoiYear(){
-    const st=S(); const hd=st.huyDoi; if(!hd)return "20XX";
+    const st=App._state(); const hd=st.huyDoi; if(!hd)return "20XX";
     // suy từ dòng đầu cột NGÀY
     for(const row of hd.data){const d=String(row[0]||"");const m=d.match(/(20\d{2})/);if(m)return m[1];}
-    // hoặc từ state.months
-    for(const mo of st.months){const t=titleFor(mo);const m2=t.match(/(20\d{2})/);if(m2)return m2[1];}
+    // hoặc từ ngày bất kỳ trong các tháng
+    for(const mo of (st.months||[])){
+      for(const sh of mo.sheets){for(const r of sh.rows){if(r.type==="row"){
+        const m=String(r.raw?.ngayOrder||r.raw?.ngayDV||"").match(/(20\d{2})/);if(m)return m[1];}}}
+    }
     return "20XX";
   }
   function huyDoiTitle(){return "ĐIỀU CHỈNH HỦY/ĐỔI NĂM "+huyDoiYear();}
 
   App.exportHuyDoiPDF=function(){
-    const hd=S().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
+    const hd=App._state().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
     const esc=s=>String(s==null?"":s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
     const ncol=hd.header.length;
     // tính tỷ lệ độ rộng cột: ĐƠN GIÁ/SL hẹp, LÝ DO rộng
@@ -1313,7 +1316,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
   };
 
   App.exportHuyDoiExcel=function(){
-    const hd=S().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
+    const hd=App._state().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
     if(typeof XLSX==="undefined"){alert("Thư viện Excel chưa tải. Tải lại trang.");return;}
     try{
     const wb=XLSX.utils.book_new();
@@ -1455,7 +1458,12 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.2</b> — (bản hiện tại)
+<b>v1.7.3</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>nút PDF/Excel HỦY/ĐỔI bấm không tác dụng</b> (lỗi "S is not defined"
+      do hàm đặt sai phạm vi). Giờ xuất được PDF và Excel cho tab HỦY/ĐỔI.</li>
+</ul>
+<b>v1.7.2</b>
 <ul style="margin:4px 0 10px">
   <li>Tab HỦY/ĐỔI: sửa nút <b>PDF/Excel HỦY/ĐỔI hoạt động</b>; <b>ẩn các nút tháng</b>
       (Excel tháng này, PDF SHOPEE/ZALO) khi ở tab này; <b>cắt cột trống thừa</b> bên phải;
