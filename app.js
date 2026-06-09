@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.7.1";
 
 const App = (() => {
   "use strict";
@@ -555,13 +555,15 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       cont.appendChild(block);
     });
 
-    // summary
-    const mo=st.months[st.current];
-    const totalRows=mo.sheets.reduce((a,s)=>a+s.rows.filter(r=>r.type==="row").length,0);
-    document.getElementById("exportSummary").innerHTML=
-      `<span class="pill">Tháng <b>${mo.month}</b></span>`+
-      mo.sheets.map(s=>`<span class="pill">${s.kind} <b>${s.rows.filter(r=>r.type==="row").length}</b> dòng</span>`).join("")+
-      `<span class="pill">Tổng <b>${totalRows}</b> dòng</span>`;
+    // summary (chỉ hiện khi đang xem tab tháng, không phải HỦY/ĐỔI)
+    if(st.current>=0 && st.current<st.months.length){
+      const mo=st.months[st.current];
+      const totalRows=mo.sheets.reduce((a,s)=>a+s.rows.filter(r=>r.type==="row").length,0);
+      document.getElementById("exportSummary").innerHTML=
+        `<span class="pill">Tháng <b>${mo.month}</b></span>`+
+        mo.sheets.map(s=>`<span class="pill">${s.kind} <b>${s.rows.filter(r=>r.type==="row").length}</b> dòng</span>`).join("")+
+        `<span class="pill">Tổng <b>${totalRows}</b> dòng</span>`;
+    }
 
     // tab HỦY/ĐỔI (nếu có) — đặt cuối cùng sau tháng 12
     if(st.huyDoi){
@@ -926,7 +928,9 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 
   function monthsToExport(scope){
     const st=S();
-    return scope==="all"?st.months:[st.months[st.current]];
+    if(scope==="all") return st.months;
+    if(st.current<0 || st.current>=st.months.length) return []; // tab HỦY/ĐỔI -> rỗng
+    return [st.months[st.current]];
   }
   function titleFor(mo){
     let yr="";
@@ -1442,11 +1446,15 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.0</b> — (bản hiện tại)
+<b>v1.7.1</b> — (bản hiện tại)
 <ul style="margin:4px 0 10px">
-  <li>Hỗ trợ tab <b>"⭕HỦY/ĐỔI SHOPEE/ZALO⭕"</b>: nhận diện tự động, hiện tab riêng
-      cuối cùng (sau T12). Xuất <b>PDF + Excel nguyên bản</b> (không điều chỉnh gì),
-      tiêu đề "ĐIỀU CHỈNH HỦY/ĐỔI NĂM 20XX", khổ ngang, header lặp lại các trang.</li>
+  <li>Sửa lỗi <b>tab HỦY/ĐỔI không hiện</b>: bấm vào tab bị lỗi JS (crash khi
+      tìm tháng ở index -1). Giờ hiện đúng bảng + nút export.</li>
+</ul>
+<b>v1.7.0</b>
+<ul style="margin:4px 0 10px">
+  <li>Hỗ trợ tab <b>"HỦY/ĐỔI SHOPEE/ZALO"</b>: nhận diện tự động, hiện tab riêng
+      cuối cùng (sau T12). Xuất PDF + Excel nguyên bản, tiêu đề "ĐIỀU CHỈNH HỦY/ĐỔI NĂM 20XX".</li>
 </ul>
 <b>v1.6.3</b>
 <ul style="margin:4px 0 10px">
