@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.3";
+const APP_VERSION = "1.7.4";
 
 const App = (() => {
   "use strict";
@@ -602,6 +602,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
 
     const wrap=el("div","preview-scroll");
     const t=el("table","pv");
+    const numCols=App._huyDoiNumCols(hd.header); // cột căn phải (theo tên header)
     let thead="<thead><tr>";
     hd.header.forEach(h=>thead+=`<th>${App._util.escapeHtml(h).replace(/\n/g,"<br>")}</th>`);
     thead+="</tr></thead>"; t.innerHTML=thead;
@@ -612,7 +613,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       row.forEach((v,ci)=>{
         const td=document.createElement("td");
         td.innerHTML=App._util.escapeHtml(String(v)).replace(/\n/g,"<br>");
-        if(ci===7||ci===8) td.className="num"; // chỉ SỐ LƯỢNG, ĐƠN GIÁ căn phải
+        if(numCols.has(ci)) td.className="num"; // chỉ SỐ LƯỢNG, ĐƠN GIÁ căn phải
         tr.appendChild(td);
       });
       // pad nếu row ngắn hơn header
@@ -621,6 +622,17 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     });
     t.appendChild(tb); wrap.appendChild(t); box.appendChild(wrap);
     return box;
+  };
+
+  // xác định các cột căn phải (số) theo TÊN header — bền với việc thêm/bớt cột
+  App._huyDoiNumCols=function(header){
+    const norm=App._util.norm;
+    const set=new Set();
+    header.forEach((h,i)=>{
+      const n=norm(h);
+      if(/(^|\s)sl(\s|$)/.test(n) || n.includes("so luong") || n.includes("don gia")) set.add(i);
+    });
+    return set;
   };
 
   App._renderSheet=function(mo,sh){
@@ -1275,10 +1287,21 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
   App.exportHuyDoiPDF=function(){
     const hd=App._state().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
     const esc=s=>String(s==null?"":s).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+    const norm=App._util.norm;
     const ncol=hd.header.length;
-    // tính tỷ lệ độ rộng cột: ĐƠN GIÁ/SL hẹp, LÝ DO rộng
-    const cw=[8,14,14,6,14,14,20,5,7,24]; // ~ tương ứng 10 cột
-    const totalW=cw.slice(0,ncol).reduce((a,b)=>a+b,0);
+    const numCols=App._huyDoiNumCols(hd.header);
+    // độ rộng cột theo TÊN: SL hẹp nhất, đơn giá hẹp, dịch vụ & lý do rộng, còn lại vừa
+    const cw=hd.header.map(h=>{
+      const n=norm(h);
+      if(/(^|\s)sl(\s|$)/.test(n)||n.includes("so luong")) return 5;
+      if(n.includes("don gia")) return 7;
+      if(n.includes("dich vu")||n.includes("san pham")) return 20;
+      if(n.includes("ly do")) return 22;
+      if(n.includes("ngay")) return 8;
+      if(n.includes("noi ban")||n.includes("tai")) return 7;
+      return 13;
+    });
+    const totalW=cw.reduce((a,b)=>a+b,0);
     let html=`<html><head><meta charset="utf-8"><title>${huyDoiTitle()}</title><style>
       @page{size:A4 landscape;margin:8mm 8mm 12mm 8mm;
         @bottom-center{content:"Trang " counter(page) " / " counter(pages);
@@ -1295,15 +1318,14 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       .spoken-word,[class*="spoken-word"],[id*="biread"]{display:none!important}
     </style></head><body>`;
     html+=`<div class="title">${esc(huyDoiTitle())}</div>`;
-    html+="<table><colgroup>"+hd.header.map((_,i)=>`<col style="width:${((cw[i]||10)/totalW*100).toFixed(1)}%">`).join("")+"</colgroup>";
+    html+="<table><colgroup>"+cw.map(w=>`<col style="width:${(w/totalW*100).toFixed(1)}%">`).join("")+"</colgroup>";
     html+="<thead><tr>"+hd.header.map(h=>`<th>${esc(h).replace(/\n/g,"<br>")}</th>`).join("")+"</tr></thead><tbody>";
     hd.data.forEach(row=>{
       if(row.every(v=>String(v).trim()===""))return;
       html+="<tr>";
       for(let i=0;i<ncol;i++){
         const v=row[i]!=null?row[i]:"";
-        const isNum=(i>=7&&i<=8);
-        html+=`<td class="${isNum?'num':''}">${esc(String(v)).replace(/\n/g,"<br>")}</td>`;
+        html+=`<td class="${numCols.has(i)?'num':''}">${esc(String(v)).replace(/\n/g,"<br>")}</td>`;
       }
       html+="</tr>";
     });
@@ -1324,6 +1346,8 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const ws={};
     const BORDER={top:{style:"thin"},bottom:{style:"thin"},left:{style:"thin"},right:{style:"thin"}};
     const ncol=hd.header.length;
+    const numCols=App._huyDoiNumCols(hd.header);
+    const norm=App._util.norm;
     const range={s:{r:0,c:0},e:{r:aoa.length-1,c:ncol-1}};
     for(let r=0;r<aoa.length;r++){
       for(let c=0;c<ncol;c++){
@@ -1334,7 +1358,7 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         if(r===0){st.font={bold:true,sz:13};st.alignment={horizontal:"center",vertical:"center"};delete st.border;}
         else if(r===1){st.font={bold:true,color:{rgb:"FFFFFF"},sz:9};
           st.fill={fgColor:{rgb:"10243F"}};st.alignment={horizontal:"center",vertical:"center",wrapText:true};}
-        else if(c>=7&&c<=8&&v!==""&&!isNaN(Number(String(v).replace(/[.,\s]/g,"")))){
+        else if(numCols.has(c)&&v!==""&&!isNaN(Number(String(v).replace(/[.,\s]/g,"")))){
           const n=parseFloat(String(v).replace(/[^\d.\-]/g,"")); if(!isNaN(n)){cell.t="n";cell.v=n;cell.z="#,##0";}
           st.alignment={...st.alignment,horizontal:"right"};
         }
@@ -1342,7 +1366,17 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       }
     }
     ws["!ref"]=XLSX.utils.encode_range(range);
-    ws["!cols"]=hd.header.map((_,i)=>({wch:[10,22,22,8,22,22,36,7,11,40][i]||12}));
+    // độ rộng cột theo tên
+    ws["!cols"]=hd.header.map(h=>{
+      const n=norm(h);
+      if(/(^|\s)sl(\s|$)/.test(n)||n.includes("so luong")) return {wch:7};
+      if(n.includes("don gia")) return {wch:11};
+      if(n.includes("dich vu")||n.includes("san pham")) return {wch:36};
+      if(n.includes("ly do")) return {wch:40};
+      if(n.includes("ngay")) return {wch:11};
+      if(n.includes("noi ban")||n.includes("tai")) return {wch:9};
+      return {wch:20};
+    });
     ws["!merges"]=[{s:{r:0,c:0},e:{r:0,c:ncol-1}}];
     XLSX.utils.book_append_sheet(wb,ws,"HỦY ĐỔI");
     const yr=huyDoiYear();
@@ -1458,7 +1492,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.3</b> — (bản hiện tại)
+<b>v1.7.4</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Tab HỦY/ĐỔI: nhận cột <b>theo TÊN tiêu đề</b> (không cứng vị trí), nên thêm/bớt cột
+      (vd "Mã Order ID Hoàn Tiền") vẫn căn đúng — chỉ Số Lượng &amp; Đơn Giá căn phải,
+      Dịch Vụ &amp; Lý Do căn trái. Độ rộng cột cũng tự điều chỉnh theo tên.</li>
+</ul>
+<b>v1.7.3</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi <b>nút PDF/Excel HỦY/ĐỔI bấm không tác dụng</b> (lỗi "S is not defined"
       do hàm đặt sai phạm vi). Giờ xuất được PDF và Excel cho tab HỦY/ĐỔI.</li>
