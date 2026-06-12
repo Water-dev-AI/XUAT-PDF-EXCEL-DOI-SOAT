@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.5";
+const APP_VERSION = "1.7.6";
 
 const App = (() => {
   "use strict";
@@ -507,10 +507,9 @@ const App = (() => {
       // (nếu có) -> không tính là lỗi.
       for(const r of out){
         if(r.type!=="row" || r.orderIdHiddenByMerge) continue;
-        const oEmpty=isBlank(r.raw.ngayOrder), dEmpty=isBlank(r.raw.ngayDV);
-        if(oEmpty || dEmpty){
-          const missing = [oEmpty?"Ngày Order":null, dEmpty?"Ngày Cung Cấp DV":null].filter(Boolean).join(" + ");
-          emptyDates.push({ri:r.ri, missing,
+        const oEmpty=isBlank(r.raw.ngayOrder);
+        if(oEmpty){
+          emptyDates.push({ri:r.ri, missing:"Ngày Order",
             ngayOrder:r.raw.ngayOrder||"", ngayDV:r.raw.ngayDV||"",
             sanPham:r.raw.sanPham, fixedOrder:r.raw.ngayOrder||"", fixedDV:r.raw.ngayDV||""});
         }
@@ -1485,12 +1484,11 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         if((codeHasHuy||spHasHuy) && !phiHuy && rec.soLuong!=null && rec.soLuong>=0)
           cancelQtyMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,40),
             sanPham:sp.slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
-        // PHÁT HIỆN LẠI: ngày trống (bỏ qua dòng con merge) - kiểm cả ngayOrder & ngayDV
+        // PHÁT HIỆN LẠI: ngày trống (bỏ qua dòng con merge) - chỉ kiểm ngayOrder
         const isSlaveRow = mergeRows[r]===undefined && (ci.orderId>=0 && String(g("orderId")).trim()==="" && (isZalo||String(g("maVan")).trim()===""));
-        const oE=String(g("ngayOrder")).trim()==="", dE=String(g("ngayDV")).trim()==="";
-        if((oE||dE) && !isSlaveRow){
-          const missing=[oE?"Ngày Order":null, dE?"Ngày Cung Cấp DV":null].filter(Boolean).join(" + ");
-          emptyDates.push({ri:r, missing, ngayOrder:rec.raw.ngayOrder||"", ngayDV:rec.raw.ngayDV||"",
+        const oE=String(g("ngayOrder")).trim()==="";
+        if(oE && !isSlaveRow){
+          emptyDates.push({ri:r, missing:"Ngày Order", ngayOrder:rec.raw.ngayOrder||"", ngayDV:rec.raw.ngayDV||"",
             sanPham:sp, fixedOrder:rec.raw.ngayOrder||"", fixedDV:rec.raw.ngayDV||""});
         }
 
@@ -1520,7 +1518,13 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.5</b> — (bản hiện tại)
+<b>v1.7.6</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Cột <b>Ngày Cung Cấp DV</b>: <b>bỏ</b> cảnh báo "ngày trống" (cho phép để trống).
+      <b>Vẫn giữ</b> cảnh báo khi các ô cùng đơn có ngày DV khác nhau.
+      Cột <b>Ngày Order (Lấy Hàng)</b> giữ nguyên cả 2 loại cảnh báo (trống + xung đột).</li>
+</ul>
+<b>v1.7.5</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi <b>bắt nhầm "ngày thiếu"</b>: khi đơn merge nhiều dòng, ô ngày trên cùng
       trống nhưng các ô dưới có ngày giống nhau → KHÔNG còn báo lỗi (vì đơn đã có ngày
