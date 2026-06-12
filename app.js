@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.4";
+const APP_VERSION = "1.7.5";
 
 const App = (() => {
   "use strict";
@@ -389,10 +389,10 @@ const App = (() => {
           (isBlank(rec.raw.orderId) && isBlank(rec.raw.maVan) && out.length &&
            out[out.length-1].type==="row");
 
-        // ngày order trống VÀ không phải dòng nối tiếp -> mới cảnh báo
+        // ngày order trống VÀ không phải dòng nối tiếp -> đánh dấu để check SAU khi gộp
+        // (vì có thể anchor trống nhưng dòng dưới có ngày -> không phải lỗi)
         if(isBlank(rec.raw.ngayOrder) && !isContinuation){
-          emptyDates.push({ri, ngayDV:rec.raw.ngayDV, sanPham:rec.raw.sanPham, fixed:""});
-          rec.emptyOrderDate=true;
+          rec.emptyOrderDate=true; // chỉ flag, chưa push vào emptyDates
         }
 
         // ---- YÊU CẦU 6: ô mã có 'HỦY' nhưng tên SP CHƯA có 'hủy' -> cho sửa tên ----
@@ -499,6 +499,20 @@ const App = (() => {
               r[(key==="ngayOrder"?"ngayOrderConflict":"ngayDVConflict")]=true;
             }
           });
+        }
+      }
+
+      // ---- Sau khi gộp ngày: kiểm tra ngày trống THẬT (chỉ với anchor/dòng độc lập) ----
+      // Dòng con của block merge -> bỏ qua. Anchor sau khi gộp đã có ngày từ dòng dưới
+      // (nếu có) -> không tính là lỗi.
+      for(const r of out){
+        if(r.type!=="row" || r.orderIdHiddenByMerge) continue;
+        const oEmpty=isBlank(r.raw.ngayOrder), dEmpty=isBlank(r.raw.ngayDV);
+        if(oEmpty || dEmpty){
+          const missing = [oEmpty?"Ngày Order":null, dEmpty?"Ngày Cung Cấp DV":null].filter(Boolean).join(" + ");
+          emptyDates.push({ri:r.ri, missing,
+            ngayOrder:r.raw.ngayOrder||"", ngayDV:r.raw.ngayDV||"",
+            sanPham:r.raw.sanPham, fixedOrder:r.raw.ngayOrder||"", fixedDV:r.raw.ngayDV||""});
         }
       }
 
@@ -805,20 +819,30 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
   App._panelEmpty=function(sh){
     const p=el("div","review");
     const head=el("div","review-head empty-h");
-    head.innerHTML=`<span>● ${sh.emptyDates.length} dòng TRỐNG ngày order — điền để sửa luôn</span><span>▾</span>`;
+    head.innerHTML=`<span>● ${sh.emptyDates.length} dòng TRỐNG ngày (Ngày Order hoặc Ngày DV) — điền để sửa luôn</span><span>▾</span>`;
     head.onclick=()=>p.classList.toggle("collapsed");
     const body=el("div","review-body");
     const tbl=el("table","rv");
-    tbl.innerHTML="<thead><tr><th>Dòng</th><th>Ngày cung cấp DV</th><th>Sản phẩm</th><th>Điền ngày order</th></tr></thead>";
+    tbl.innerHTML="<thead><tr><th>Dòng</th><th>Cột thiếu</th><th>Sản phẩm</th>"+
+      "<th>Ngày Order</th><th>Ngày Cung Cấp DV</th></tr></thead>";
     const tb=el("tbody");
     sh.emptyDates.forEach(ed=>{
       const tr=el("tr");
-      tr.innerHTML=`<td>${ed.ri+1}</td><td>${ed.ngayDV||'<span class=muted>—</span>'}</td>`+
-        `<td style="max-width:340px;white-space:normal">${App._util.escapeHtml(ed.sanPham||'')}</td>`;
-      const td=el("td");const inp=el("input");inp.type="text";inp.placeholder="vd 5/4/2025";inp.value=ed.fixed;
-      inp.oninput=e=>{ed.fixed=e.target.value;const rec=sh.rows.find(r=>r.ri===ed.ri);
+      tr.innerHTML=`<td>${ed.ri+1}</td><td><b style="color:var(--danger)">${App._util.escapeHtml(ed.missing||'')}</b></td>`+
+        `<td style="max-width:300px;white-space:normal">${App._util.escapeHtml(ed.sanPham||'')}</td>`;
+      // ô sửa Ngày Order
+      const tdO=el("td");const ipO=el("input");ipO.type="text";ipO.placeholder="vd 5/4/2025";
+      ipO.value=ed.fixedOrder||""; ipO.style.fontSize="12px";
+      ipO.oninput=e=>{ed.fixedOrder=e.target.value;const rec=sh.rows.find(r=>r.ri===ed.ri);
         if(rec)rec.raw.ngayOrder=e.target.value;App._refreshPreview(sh);};
-      td.appendChild(inp);tr.appendChild(td);tb.appendChild(tr);
+      tdO.appendChild(ipO);tr.appendChild(tdO);
+      // ô sửa Ngày DV
+      const tdD=el("td");const ipD=el("input");ipD.type="text";ipD.placeholder="vd 5/4/2025";
+      ipD.value=ed.fixedDV||""; ipD.style.fontSize="12px";
+      ipD.oninput=e=>{ed.fixedDV=e.target.value;const rec=sh.rows.find(r=>r.ri===ed.ri);
+        if(rec)rec.raw.ngayDV=e.target.value;App._refreshPreview(sh);};
+      tdD.appendChild(ipD);tr.appendChild(tdD);
+      tb.appendChild(tr);
     });
     tbl.appendChild(tb);body.appendChild(tbl);p.appendChild(head);p.appendChild(body);
     return p;
@@ -1461,10 +1485,14 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
         if((codeHasHuy||spHasHuy) && !phiHuy && rec.soLuong!=null && rec.soLuong>=0)
           cancelQtyMismatch.push({ri:r, code:(oid+" "+mv).trim().slice(0,40),
             sanPham:sp.slice(0,40), sl:rec.soLuong, fixed:rec.soLuong});
-        // PHÁT HIỆN LẠI: ngày order trống (bỏ qua dòng con merge)
+        // PHÁT HIỆN LẠI: ngày trống (bỏ qua dòng con merge) - kiểm cả ngayOrder & ngayDV
         const isSlaveRow = mergeRows[r]===undefined && (ci.orderId>=0 && String(g("orderId")).trim()==="" && (isZalo||String(g("maVan")).trim()===""));
-        if(String(g("ngayOrder")).trim()==="" && !isSlaveRow)
-          emptyDates.push({ri:r, ngayDV:rec.raw.ngayDV, sanPham:sp, fixed:""});
+        const oE=String(g("ngayOrder")).trim()==="", dE=String(g("ngayDV")).trim()==="";
+        if((oE||dE) && !isSlaveRow){
+          const missing=[oE?"Ngày Order":null, dE?"Ngày Cung Cấp DV":null].filter(Boolean).join(" + ");
+          emptyDates.push({ri:r, missing, ngayOrder:rec.raw.ngayOrder||"", ngayDV:rec.raw.ngayDV||"",
+            sanPham:sp, fixedOrder:rec.raw.ngayOrder||"", fixedDV:rec.raw.ngayDV||""});
+        }
 
         if(mergeRows[r]){rec.orderIdRowSpan=mergeRows[r];rec.maVanRowSpan=mergeRows[r];}
         // STT: dòng con merge (ô mã trống do bị anchor phủ) -> không tăng
@@ -1492,7 +1520,14 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.4</b> — (bản hiện tại)
+<b>v1.7.5</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Sửa lỗi <b>bắt nhầm "ngày thiếu"</b>: khi đơn merge nhiều dòng, ô ngày trên cùng
+      trống nhưng các ô dưới có ngày giống nhau → KHÔNG còn báo lỗi (vì đơn đã có ngày
+      hợp lệ từ dòng dưới). Chỉ báo khi đơn thực sự thiếu ngày. Đồng thời kiểm cả
+      <b>Ngày Order và Ngày DV</b>, ghi rõ cột nào thiếu, cho sửa từng cột riêng.</li>
+</ul>
+<b>v1.7.4</b>
 <ul style="margin:4px 0 10px">
   <li>Tab HỦY/ĐỔI: nhận cột <b>theo TÊN tiêu đề</b> (không cứng vị trí), nên thêm/bớt cột
       (vd "Mã Order ID Hoàn Tiền") vẫn căn đúng — chỉ Số Lượng &amp; Đơn Giá căn phải,
