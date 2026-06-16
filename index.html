@@ -145,6 +145,14 @@
       <div style="flex:2">
         <label>Link Google Sheet</label>
         <input type="text" id="sheetUrl" placeholder="Dán link Google Sheet vào đây...">
+        <div id="savedSheetsRow" style="display:none;margin-top:6px;align-items:center;flex-wrap:wrap;gap:6px">
+          <span style="font-size:12px;color:var(--ink-soft)">Đã lưu:</span>
+          <select id="savedSheets" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:#fff">
+            <option value="">— Chọn sheet đã lưu —</option>
+          </select>
+          <button type="button" id="delSavedSheet" title="Xoá sheet đang chọn khỏi danh sách"
+            style="padding:5px 9px;border:1px solid var(--line);background:#fff;border-radius:6px;cursor:pointer;font-size:13px">✕</button>
+        </div>
       </div>
       <div>
         <label>Google API Key</label>
@@ -219,7 +227,7 @@
   </span>
 </div>
 
-<script src="app.js?v=1.8.0"></script>
+<script src="app.js?v=1.8.2"></script>
 <script>
   try{
     if(typeof APP_VERSION!=="undefined"){
