@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.7.6";
+const APP_VERSION = "1.8.0";
 
 const App = (() => {
   "use strict";
@@ -50,7 +50,7 @@ const App = (() => {
   };
   const VAT_RATE = 1.1; // 10%
 
-  let state = { months:[], current:0, sheetId:"" };
+  let state = { months:[], current:0, sheetId:"", spreadsheetTitle:"" };
 
   /* ----- tiện ích ---------------------------------------------------------*/
   const norm = s => (s==null?"":String(s))
@@ -192,7 +192,7 @@ const App = (() => {
       try{
         // lấy metadata: tên tab + merges + màu nền + ĐỊNH DẠNG CHỮ (gạch ngang) + giá trị
         const metaUrl=`https://sheets.googleapis.com/v4/spreadsheets/${id}`+
-          `?fields=sheets(properties(title,sheetId),merges,`+
+          `?fields=properties(title),sheets(properties(title,sheetId),merges,`+
           `data(rowData(values(formattedValue,effectiveFormat(backgroundColor,textFormat(strikethrough)),`+
           `textFormatRuns(startIndex,format(strikethrough))))))`+
           `&includeGridData=true&key=${key}`;
@@ -233,6 +233,7 @@ const App = (() => {
 
         state.months = App._buildMonths(valid);
         state.current = 0;
+        state.spreadsheetTitle = data.properties?.title || "";
 
         // Parse tab HỦY/ĐỔI (nếu có): giữ nguyên bản gốc, không sửa
         state.huyDoi = null;
@@ -1084,6 +1085,69 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
   const BORDER={top:{style:"thin",color:{rgb:"BBBBBB"}},bottom:{style:"thin",color:{rgb:"BBBBBB"}},
                 left:{style:"thin",color:{rgb:"BBBBBB"}},right:{style:"thin",color:{rgb:"BBBBBB"}}};
   const numFmt='#,##0';
+  // Dựng workbook Excel cho 1 tháng (gồm các tab SHOPEE/ZALO). Tách riêng để
+  // dùng được cả cho exportExcel (writeFile) và exportZipAll (write -> blob).
+  function buildMonthWb(mo){
+    const wb=XLSX.utils.book_new();
+    mo.sheets.forEach(sh=>{
+      const {cols,aoa,strikeMx,merges,rowMeta}=sheetMatrix(sh);
+      const title=titleFor(mo);
+      // chèn dòng tiêu đề lớn (đẩy mọi thứ xuống 1 dòng)
+      const data=[cols.map((_,i)=> i===0?title:"")].concat(aoa);
+      const meta=["title"].concat(rowMeta);
+      const strikeData=[cols.map(()=>false)].concat(strikeMx); // song song data
+
+      const ws={};
+      const moneyCols=new Set([cols.indexOf("soLuong"),cols.indexOf("donGiaGiam"),cols.indexOf("donGiaChuaVat")]);
+      const sttCol=cols.indexOf("stt");
+      const range={s:{r:0,c:0},e:{r:data.length-1,c:cols.length-1}};
+      for(let r=0;r<data.length;r++){
+        for(let c=0;c<cols.length;c++){
+          const addr=XLSX.utils.encode_cell({r,c});
+          let v=data[r][c];
+          const m=meta[r];
+          const cell={};
+          const isMoney=moneyCols.has(c), isStt=(c===sttCol);
+          if((isMoney||isStt) && m!=="title" && m!=="header" && m!=="vatinfo" && v!=="" && v!=null && !isNaN(Number(v))){
+            cell.t="n"; cell.v=Number(v); if(isMoney)cell.z=numFmt;
+          } else {
+            cell.t="s"; cell.v=(v==null?"":String(v));
+          }
+          const st={border:BORDER,alignment:{vertical:"center",wrapText:true}};
+          if(m==="title"){st.font={bold:true,sz:13};st.alignment={horizontal:"center",vertical:"center"};delete st.border;}
+          else if(m==="header"){st.font={bold:true,color:{rgb:"FFFFFF"},sz:9};
+            st.fill={fgColor:{rgb:"10243F"}};st.alignment={horizontal:"center",vertical:"center",wrapText:true};}
+          else if(m==="daybreak"){st.fill={fgColor:{rgb:"CFE8D8"}};}
+          else if(m==="vatinfo"){st.fill={fgColor:{rgb:"FFF7E6"}};st.font={italic:true,sz:8,color:{rgb:"5A4200"}};}
+          else if(m==="cancel"){st.fill={fgColor:{rgb:"FDECEA"}};}
+          if(isMoney&&m!=="title"&&m!=="header") st.alignment={...st.alignment,horizontal:"right"};
+          if(isStt&&m!=="title"&&m!=="header") st.alignment={...st.alignment,horizontal:"center"};
+          // gạch ngang: nếu ô gốc có strikethrough -> set vào font (Excel strike cả ô)
+          if(strikeData[r] && strikeData[r][c]){
+            st.font = Object.assign({}, st.font, {strike:true});
+          }
+          cell.s=st;
+          ws[addr]=cell;
+        }
+      }
+      ws["!ref"]=XLSX.utils.encode_range(range);
+      ws["!cols"]=cols.map(c=>({wch:COLW[c]||12}));
+      // chiều cao dòng ngắt ngày mỏng
+      ws["!rows"]=meta.map(m=> m==="daybreak"?{hpt:6}:(m==="title"?{hpt:22}:{}));
+      // merges: title + (merges dịch xuống 1 do chèn title)
+      const allMerges=[{s:{r:0,c:0},e:{r:0,c:cols.length-1}}];
+      merges.forEach(m=>allMerges.push({s:{r:m.s.r+1,c:m.s.c},e:{r:m.e.r+1,c:m.e.c}}));
+      ws["!merges"]=allMerges;
+      XLSX.utils.book_append_sheet(wb,ws,("T"+mo.month+" "+sh.kind).slice(0,31));
+    });
+    return wb;
+  }
+
+  // Tên file Excel cho 1 tháng (dùng chung exportExcel + ZIP)
+  function monthExcelName(mo){
+    return `Doi-soat_T${mo.month}_${yearOf(mo)}.xlsx`;
+  }
+
   App.exportExcel=function(scope){
     if(typeof XLSX==="undefined"){
       alert("Thư viện tạo Excel chưa tải được (có thể do mạng chặn CDN). "+
@@ -1093,62 +1157,10 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     const mos=monthsToExport(scope);
     if(!mos.length || mos.some(m=>!m)){ alert("Chưa có dữ liệu tháng để xuất."); return; }
     try{
-    mos.forEach(mo=>{
-      const wb=XLSX.utils.book_new();
-      mo.sheets.forEach(sh=>{
-        const {cols,aoa,strikeMx,merges,rowMeta}=sheetMatrix(sh);
-        const title=titleFor(mo);
-        // chèn dòng tiêu đề lớn (đẩy mọi thứ xuống 1 dòng)
-        const data=[cols.map((_,i)=> i===0?title:"")].concat(aoa);
-        const meta=["title"].concat(rowMeta);
-        const strikeData=[cols.map(()=>false)].concat(strikeMx); // song song data
-
-        const ws={};
-        const moneyCols=new Set([cols.indexOf("soLuong"),cols.indexOf("donGiaGiam"),cols.indexOf("donGiaChuaVat")]);
-        const sttCol=cols.indexOf("stt");
-        const range={s:{r:0,c:0},e:{r:data.length-1,c:cols.length-1}};
-        for(let r=0;r<data.length;r++){
-          for(let c=0;c<cols.length;c++){
-            const addr=XLSX.utils.encode_cell({r,c});
-            let v=data[r][c];
-            const m=meta[r];
-            const cell={};
-            const isMoney=moneyCols.has(c), isStt=(c===sttCol);
-            if((isMoney||isStt) && m!=="title" && m!=="header" && m!=="vatinfo" && v!=="" && v!=null && !isNaN(Number(v))){
-              cell.t="n"; cell.v=Number(v); if(isMoney)cell.z=numFmt;
-            } else {
-              cell.t="s"; cell.v=(v==null?"":String(v));
-            }
-            const st={border:BORDER,alignment:{vertical:"center",wrapText:true}};
-            if(m==="title"){st.font={bold:true,sz:13};st.alignment={horizontal:"center",vertical:"center"};delete st.border;}
-            else if(m==="header"){st.font={bold:true,color:{rgb:"FFFFFF"},sz:9};
-              st.fill={fgColor:{rgb:"10243F"}};st.alignment={horizontal:"center",vertical:"center",wrapText:true};}
-            else if(m==="daybreak"){st.fill={fgColor:{rgb:"CFE8D8"}};}
-            else if(m==="vatinfo"){st.fill={fgColor:{rgb:"FFF7E6"}};st.font={italic:true,sz:8,color:{rgb:"5A4200"}};}
-            else if(m==="cancel"){st.fill={fgColor:{rgb:"FDECEA"}};}
-            if(isMoney&&m!=="title"&&m!=="header") st.alignment={...st.alignment,horizontal:"right"};
-            if(isStt&&m!=="title"&&m!=="header") st.alignment={...st.alignment,horizontal:"center"};
-            // gạch ngang: nếu ô gốc có strikethrough -> set vào font (Excel strike cả ô)
-            if(strikeData[r] && strikeData[r][c]){
-              st.font = Object.assign({}, st.font, {strike:true});
-            }
-            cell.s=st;
-            ws[addr]=cell;
-          }
-        }
-        ws["!ref"]=XLSX.utils.encode_range(range);
-        ws["!cols"]=cols.map(c=>({wch:COLW[c]||12}));
-        // chiều cao dòng ngắt ngày mỏng
-        ws["!rows"]=meta.map(m=> m==="daybreak"?{hpt:6}:(m==="title"?{hpt:22}:{}));
-        // merges: title + (merges dịch xuống 1 do chèn title)
-        const allMerges=[{s:{r:0,c:0},e:{r:0,c:cols.length-1}}];
-        merges.forEach(m=>allMerges.push({s:{r:m.s.r+1,c:m.s.c},e:{r:m.e.r+1,c:m.e.c}}));
-        ws["!merges"]=allMerges;
-        XLSX.utils.book_append_sheet(wb,ws,("T"+mo.month+" "+sh.kind).slice(0,31));
+      mos.forEach(mo=>{
+        const wb=buildMonthWb(mo);
+        XLSX.writeFile(wb, monthExcelName(mo));
       });
-      const yr=(titleFor(mo).match(/20\d{2}/)||["20XX"])[0];
-      XLSX.writeFile(wb,`Doi-soat_T${mo.month}_${yr}.xlsx`);
-    });
     }catch(err){
       alert("Lỗi khi tạo Excel: "+(err&&err.message?err.message:err));
       console.error("exportExcel error:",err);
@@ -1360,10 +1372,9 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     w.onload=()=>{cleanExt();setTimeout(()=>{cleanExt();w.print();},350);};
   };
 
-  App.exportHuyDoiExcel=function(){
-    const hd=App._state().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
-    if(typeof XLSX==="undefined"){alert("Thư viện Excel chưa tải. Tải lại trang.");return;}
-    try{
+  // Dựng workbook Excel cho tab HỦY/ĐỔI. Trả về {wb, fileName} hoặc null.
+  function buildHuyDoiWb(){
+    const hd=App._state().huyDoi; if(!hd) return null;
     const wb=XLSX.utils.book_new();
     const aoa=[[huyDoiTitle(),...hd.header.slice(1).map(()=>"")]].concat([hd.header]).concat(hd.data.filter(r=>r.some(v=>String(v).trim()!=="")));
     const ws={};
@@ -1389,7 +1400,6 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
       }
     }
     ws["!ref"]=XLSX.utils.encode_range(range);
-    // độ rộng cột theo tên
     ws["!cols"]=hd.header.map(h=>{
       const n=norm(h);
       if(/(^|\s)sl(\s|$)/.test(n)||n.includes("so luong")) return {wch:7};
@@ -1402,9 +1412,86 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
     });
     ws["!merges"]=[{s:{r:0,c:0},e:{r:0,c:ncol-1}}];
     XLSX.utils.book_append_sheet(wb,ws,"HỦY ĐỔI");
-    const yr=huyDoiYear();
-    XLSX.writeFile(wb,`Dieu-chinh_Huy-Doi_${yr}.xlsx`);
+    return {wb, fileName:`Dieu-chinh_Huy-Doi_${huyDoiYear()}.xlsx`};
+  }
+
+  App.exportHuyDoiExcel=function(){
+    const hd=App._state().huyDoi; if(!hd){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
+    if(typeof XLSX==="undefined"){alert("Thư viện Excel chưa tải. Tải lại trang.");return;}
+    try{
+      const out=buildHuyDoiWb();
+      if(!out){alert("Không có dữ liệu tab HỦY/ĐỔI.");return;}
+      XLSX.writeFile(out.wb, out.fileName);
     }catch(err){alert("Lỗi xuất Excel HỦY/ĐỔI: "+(err.message||err));}
+  };
+
+  // ========== EXPORT ZIP: gom toàn bộ Excel theo cấu trúc folder ==========
+  // <Năm>/
+  //   T5/Doi-soat_T5_<Năm>.xlsx
+  //   T6/Doi-soat_T6_<Năm>.xlsx
+  //   ...
+  //   Huy-Doi/Dieu-chinh_Huy-Doi_<Năm>.xlsx
+  // Tên file ZIP = tiêu đề Google Sheet (đã làm sạch). Fallback "Doi-soat_<Năm>".
+  App.exportZipAll=function(){
+    if(typeof XLSX==="undefined"){alert("Thư viện Excel chưa tải. Tải lại trang.");return;}
+    if(typeof JSZip==="undefined"){
+      alert("Thư viện ZIP (JSZip) chưa tải được. Có thể mạng chặn CDN. "+
+            "Hãy kiểm tra kết nối rồi tải lại trang (Ctrl/Cmd + Shift + R).");
+      return;
+    }
+    const st=App._state();
+    const mos=st.months||[];
+    if(!mos.length && !st.huyDoi){ alert("Chưa có dữ liệu để xuất."); return; }
+
+    try{
+      // Suy năm tổng: ưu tiên năm trong tiêu đề Google Sheet -> từ dữ liệu tháng đầu -> huyDoi
+      let year="";
+      const titleStr = st.spreadsheetTitle||"";
+      const mt = titleStr.match(/(20\d{2})/); if(mt) year=mt[1];
+      if(!year && mos.length) year=yearOf(mos[0]);
+      if(!year && st.huyDoi) year=huyDoiYear();
+      if(!year) year="20XX";
+
+      // Tên thư mục gốc trong ZIP & tên file ZIP: dùng tiêu đề Google Sheet đã làm sạch.
+      // Nếu không có tiêu đề -> "Doi-soat_<Năm>".
+      const sanitize = s => String(s||"").replace(/[\\/:*?"<>|]+/g,"_")
+                                          .replace(/\s+/g," ").trim();
+      const baseName = sanitize(titleStr) || `Doi-soat_${year}`;
+
+      const zip = new JSZip();
+      const root = zip.folder(baseName);
+
+      // Mỗi tháng -> folder T<n>/file Excel
+      mos.forEach(mo=>{
+        const wb=buildMonthWb(mo);
+        const buf=XLSX.write(wb,{type:"array",bookType:"xlsx"});
+        root.folder(`T${mo.month}`).file(monthExcelName(mo), buf);
+      });
+
+      // Tab HỦY/ĐỔI (nếu có) -> folder Huy-Doi/
+      if(st.huyDoi){
+        const hdOut=buildHuyDoiWb();
+        if(hdOut){
+          const buf=XLSX.write(hdOut.wb,{type:"array",bookType:"xlsx"});
+          root.folder("Huy-Doi").file(hdOut.fileName, buf);
+        }
+      }
+
+      // Tạo Blob và tải về
+      zip.generateAsync({type:"blob"}).then(blob=>{
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement("a");
+        a.href=url; a.download=`${baseName}.zip`;
+        document.body.appendChild(a); a.click();
+        setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},100);
+      }).catch(err=>{
+        alert("Lỗi tạo ZIP: "+(err.message||err));
+        console.error("zip error:",err);
+      });
+    }catch(err){
+      alert("Lỗi xuất ZIP: "+(err&&err.message?err.message:err));
+      console.error("exportZipAll error:",err);
+    }
   };
 
   // dựng state.months từ workbook đã xuất (cấu trúc cố định: r0 title, r1 header, r2+ data)
@@ -1518,7 +1605,18 @@ try{const k=localStorage.getItem("ds_apikey");if(k){document.getElementById("api
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.7.6</b> — (bản hiện tại)
+<b>v1.8.0</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Nút mới <b>📦 Tải ZIP (tất cả Excel)</b>: gom toàn bộ Excel của các tháng và tab
+      HỦY/ĐỔI vào <b>1 file ZIP</b>, theo cấu trúc thư mục:
+      <code>&lt;Tên Sheet&gt;/T5/Doi-soat_T5_2025.xlsx</code>,
+      <code>&lt;Tên Sheet&gt;/T6/...</code>,
+      <code>&lt;Tên Sheet&gt;/Huy-Doi/Dieu-chinh_Huy-Doi_2025.xlsx</code>.
+      Tên file ZIP &amp; thư mục gốc = <b>tiêu đề Google Sheet</b> (đã làm sạch ký tự).
+      <i>Lưu ý:</i> PDF không gom được vào ZIP vì phải qua hộp thoại in của trình duyệt
+      — vẫn dùng các nút PDF như cũ.</li>
+</ul>
+<b>v1.7.6</b>
 <ul style="margin:4px 0 10px">
   <li>Cột <b>Ngày Cung Cấp DV</b>: <b>bỏ</b> cảnh báo "ngày trống" (cho phép để trống).
       <b>Vẫn giữ</b> cảnh báo khi các ô cùng đơn có ngày DV khác nhau.

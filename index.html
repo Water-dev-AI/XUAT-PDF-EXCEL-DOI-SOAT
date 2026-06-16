@@ -13,6 +13,13 @@
     document.write('<script src="https://unpkg.com/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"><\/script>');
   }
 </script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script>
+  // Fallback nếu jsDelivr bị chặn: thử unpkg
+  if(typeof JSZip==="undefined"){
+    document.write('<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"><\/script>');
+  }
+</script>
 <style>
   :root{
     --ink:#1a2233; --ink-soft:#4a5568; --line:#d8dee9; --line-soft:#eceff4;
@@ -204,6 +211,7 @@
     <button class="btn-ok" onclick="App.exportExcel('all')">⬇ Excel (tất cả)</button>
     <button class="btn-ok" onclick="App.exportPDF('all','SHOPEE')">🖨 PDF SHOPEE (tất cả)</button>
     <button class="btn-ok" onclick="App.exportPDF('all','ZALO')">🖨 PDF ZALO (tất cả)</button>
+    <button class="btn-ok" style="background:#6f4ec7" onclick="App.exportZipAll()">📦 Tải ZIP (tất cả Excel)</button>
   </span>
   <span class="btn-grp-huydoi" style="display:none">
     <button class="btn-ghost" onclick="App.exportHuyDoiPDF()">🖨 PDF HỦY/ĐỔI</button>
@@ -211,7 +219,7 @@
   </span>
 </div>
 
-<script src="app.js?v=1.7.6"></script>
+<script src="app.js?v=1.8.0"></script>
 <script>
   try{
     if(typeof APP_VERSION!=="undefined"){
