@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.8.3";
+const APP_VERSION = "1.8.5";
 
 const App = (() => {
   "use strict";
@@ -196,33 +196,72 @@ const App = (() => {
           `data(rowData(values(formattedValue,effectiveFormat(backgroundColor,textFormat(strikethrough)),`+
           `textFormatRuns(startIndex,format(strikethrough))))))`+
           `&includeGridData=true&key=${key}`;
-        const res=await fetch(metaUrl);
-        if(!res.ok){
-          // thử parse error JSON; nếu không parse được, dùng text
-          let errMsg = "HTTP "+res.status;
-          try{
-            const e=await res.json();
-            if(e && e.error && e.error.message) errMsg = e.error.message;
-          }catch(_){
-            try{ const t=await res.text(); if(t) errMsg += " — "+t.slice(0,200); }catch(__){}
+
+        // Stream response để hiện tiến trình tải về.
+        // Sheet to (vài MB) có thể mất 15-30s ở phía server. Hiện trạng thái rõ
+        // để người dùng KHÔNG bấm lại nút lần thứ 2 (gây cancel + lỗi rỗng).
+        async function fetchStream(url){
+          const res = await fetch(url, {cache:"no-store"});
+          if(!res.ok){
+            let errMsg = "HTTP "+res.status;
+            try{
+              const e = await res.json();
+              if(e && e.error && e.error.message) errMsg = e.error.message;
+            }catch(_){
+              try{ const t = await res.text(); if(t) errMsg += " — "+t.slice(0,200); }catch(__){}
+            }
+            throw new Error(errMsg);
           }
-          throw new Error(errMsg);
+          const total = parseInt(res.headers.get("content-length")||"0",10);
+          const fmtMB = b => (b/1024/1024).toFixed(2)+"MB";
+
+          // Nếu trình duyệt không hỗ trợ stream, fallback về text() trực tiếp
+          if(!res.body || !res.body.getReader){
+            show("info",'<span class="spin"></span>Đang tải dữ liệu... (sheet nặng, có thể mất 15-30 giây — đừng bấm lại nút)');
+            const txt = await res.text();
+            if(!txt || !txt.trim())
+              throw new Error("Phản hồi rỗng (HTTP "+res.status+"). Có thể do mạng bị ngắt.");
+            try{ return JSON.parse(txt); }
+            catch(e){ throw new Error("Phản hồi không phải JSON. 200 ký tự đầu: "+txt.slice(0,200)); }
+          }
+
+          const reader = res.body.getReader();
+          const dec = new TextDecoder("utf-8");
+          let received = 0, chunks = [];
+          let lastShow = 0;
+          while(true){
+            const {done, value} = await reader.read();
+            if(done) break;
+            chunks.push(value); received += value.length;
+            // update UI ~mỗi 200ms
+            const now = Date.now();
+            if(now - lastShow > 200){
+              lastShow = now;
+              // Lưu ý: với Content-Encoding gzip, browser tự giải nén nên
+              // `received` (sau giải nén) có thể > `total` (size nén). Chỉ hiện
+              // % khi received <= total, ngoài ra chỉ hiện dung lượng đã nhận.
+              const showPct = total && received <= total;
+              const pct = showPct ? Math.min(99, Math.floor(received*100/total)) : null;
+              const txt = showPct
+                ? `<span class="spin"></span>Đang tải dữ liệu... ${fmtMB(received)} / ${fmtMB(total)} (${pct}%) — đừng bấm lại nút`
+                : `<span class="spin"></span>Đang tải dữ liệu... ${fmtMB(received)} — đừng bấm lại nút`;
+              show("info", txt);
+            }
+          }
+          // gộp toàn bộ chunks -> string
+          const all = new Uint8Array(received);
+          let off = 0;
+          for(const c of chunks){ all.set(c, off); off += c.length; }
+          const text = dec.decode(all);
+          if(!text || !text.trim())
+            throw new Error("Phản hồi rỗng dù HTTP 200. Mạng có thể đã ngắt giữa chừng. Thử lại sau ít giây.");
+          try{ return JSON.parse(text); }
+          catch(e){ throw new Error("Phản hồi không phải JSON. 200 ký tự đầu: "+text.slice(0,200)); }
         }
-        // parse JSON kèm chẩn đoán nếu body rỗng / không phải JSON
-        let data;
-        try{
-          const txt = await res.text();
-          if(!txt || !txt.trim()){
-            throw new Error("Google Sheets API trả về dữ liệu rỗng (HTTP "+res.status+"). "+
-              "Có thể do mạng/proxy chặn hoặc tường lửa. Thử mở lại trang và kiểm tra kết nối.");
-          }
-          try{
-            data = JSON.parse(txt);
-          }catch(parseErr){
-            throw new Error("Không đọc được dữ liệu từ Google (không phải JSON). "+
-              "Có thể do mạng/proxy chèn trang chặn. 200 ký tự đầu: "+txt.slice(0,200));
-          }
-        }catch(e){ throw e; }
+
+        console.log("[load] URL:", metaUrl.length, "ký tự");
+        show("info",'<span class="spin"></span>Đang kết nối với Google Sheets... (sheet to có thể mất 15-30 giây, vui lòng KHÔNG bấm lại nút)');
+        const data = await fetchStream(metaUrl);
         const tabs=(data.sheets||[]).map(s=>s.properties.title);
 
         // chỉ giữ tab dạng "T<số> SHOPEE" / "T<số> ZALO"
@@ -1721,7 +1760,28 @@ try{
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.8.3</b> — (bản hiện tại)
+<b>v1.8.5</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li><b>Sửa triệt để lỗi "phản hồi rỗng" với sheet to.</b> Nguyên nhân thật:
+      response từ Google ~7 MB, mất 15–30 giây ở phía server. Người dùng tưởng web
+      treo nên bấm lại nút "Đọc dữ liệu" → request đầu bị cancel → trả body rỗng.
+      Giờ web:
+      <ol style="margin:4px 0 0">
+        <li>Hiện <b>thanh tiến trình</b> "Đang tải... 1.2MB / 7MB" để biết đang chạy.</li>
+        <li>Nhắc rõ "<b>đừng bấm lại nút</b>" khi đang tải.</li>
+        <li>Bỏ retry tự động (gây lỗi false positive khi sheet to).</li>
+      </ol>
+  </li>
+</ul>
+<b>v1.8.4</b>
+<ul style="margin:4px 0 10px">
+  <li><b>Tự retry khi mạng trục trặc</b>: nếu Google Sheets API trả về phản hồi rỗng
+      hoặc lỗi mạng tạm thời, web sẽ tự động thử lại tối đa 3 lần (delay 0.6s và
+      1.2s giữa các lần). Trên màn hình sẽ hiện "Đang thử lại lần X/3..." khi đang
+      retry. Chỉ báo lỗi cuối cùng nếu cả 3 lần đều thất bại.</li>
+  <li>Thêm <code>console.log</code> độ dài URL gọi API để dễ debug khi sheet quá to.</li>
+</ul>
+<b>v1.8.3</b>
 <ul style="margin:4px 0 10px">
   <li>Thông báo lỗi rõ hơn khi gọi Google Sheets API gặp sự cố mạng (trước đây
       hiện chung chung "Unexpected end of JSON input"). Giờ tách rõ:
