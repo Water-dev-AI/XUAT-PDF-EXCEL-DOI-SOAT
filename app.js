@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.8.5";
+const APP_VERSION = "1.9.0";
 
 const App = (() => {
   "use strict";
@@ -190,17 +190,15 @@ const App = (() => {
       btn.disabled=true; show("info",'<span class="spin"></span>Đang đọc danh sách tab...');
 
       try{
-        // lấy metadata: tên tab + merges + màu nền + ĐỊNH DẠNG CHỮ (gạch ngang) + giá trị
-        const metaUrl=`https://sheets.googleapis.com/v4/spreadsheets/${id}`+
-          `?fields=properties(title),sheets(properties(title,sheetId),merges,`+
-          `data(rowData(values(formattedValue,effectiveFormat(backgroundColor,textFormat(strikethrough)),`+
-          `textFormatRuns(startIndex,format(strikethrough))))))`+
-          `&includeGridData=true&key=${key}`;
+        // ====== Chiến lược "chia nhỏ" để tránh response 7MB+ làm timeout ======
+        // BƯỚC 1 (nhẹ ~vài KB): chỉ lấy danh sách tab + properties để xác định
+        //   tab nào cần đọc (T# SHOPEE/ZALO + HỦY/ĐỔI). Bỏ qua tab rác.
+        // BƯỚC 2 (mỗi tab 1 call, chạy song song): lấy data + merges cho riêng
+        //   từng tab cần dùng. Mỗi call nhỏ -> ít rủi ro mạng/timeout.
 
-        // Stream response để hiện tiến trình tải về.
-        // Sheet to (vài MB) có thể mất 15-30s ở phía server. Hiện trạng thái rõ
-        // để người dùng KHÔNG bấm lại nút lần thứ 2 (gây cancel + lỗi rỗng).
-        async function fetchStream(url){
+        // Hàm fetch + parse JSON với log chi tiết để debug khi rỗng
+        async function fetchJson(url, label){
+          const t0 = Date.now();
           const res = await fetch(url, {cache:"no-store"});
           if(!res.ok){
             let errMsg = "HTTP "+res.status;
@@ -210,78 +208,96 @@ const App = (() => {
             }catch(_){
               try{ const t = await res.text(); if(t) errMsg += " — "+t.slice(0,200); }catch(__){}
             }
-            throw new Error(errMsg);
+            throw new Error(`[${label}] ${errMsg}`);
           }
-          const total = parseInt(res.headers.get("content-length")||"0",10);
-          const fmtMB = b => (b/1024/1024).toFixed(2)+"MB";
-
-          // Nếu trình duyệt không hỗ trợ stream, fallback về text() trực tiếp
-          if(!res.body || !res.body.getReader){
-            show("info",'<span class="spin"></span>Đang tải dữ liệu... (sheet nặng, có thể mất 15-30 giây — đừng bấm lại nút)');
-            const txt = await res.text();
-            if(!txt || !txt.trim())
-              throw new Error("Phản hồi rỗng (HTTP "+res.status+"). Có thể do mạng bị ngắt.");
-            try{ return JSON.parse(txt); }
-            catch(e){ throw new Error("Phản hồi không phải JSON. 200 ký tự đầu: "+txt.slice(0,200)); }
+          const txt = await res.text();
+          const dt = Date.now()-t0;
+          console.log(`[load:${label}] ${dt}ms, ${txt.length} ký tự`);
+          if(!txt || !txt.trim()){
+            throw new Error(`[${label}] Phản hồi rỗng (HTTP ${res.status}, ${dt}ms). `+
+              `Content-Length=${res.headers.get("content-length")||"?"}. Mạng có thể đã ngắt.`);
           }
-
-          const reader = res.body.getReader();
-          const dec = new TextDecoder("utf-8");
-          let received = 0, chunks = [];
-          let lastShow = 0;
-          while(true){
-            const {done, value} = await reader.read();
-            if(done) break;
-            chunks.push(value); received += value.length;
-            // update UI ~mỗi 200ms
-            const now = Date.now();
-            if(now - lastShow > 200){
-              lastShow = now;
-              // Lưu ý: với Content-Encoding gzip, browser tự giải nén nên
-              // `received` (sau giải nén) có thể > `total` (size nén). Chỉ hiện
-              // % khi received <= total, ngoài ra chỉ hiện dung lượng đã nhận.
-              const showPct = total && received <= total;
-              const pct = showPct ? Math.min(99, Math.floor(received*100/total)) : null;
-              const txt = showPct
-                ? `<span class="spin"></span>Đang tải dữ liệu... ${fmtMB(received)} / ${fmtMB(total)} (${pct}%) — đừng bấm lại nút`
-                : `<span class="spin"></span>Đang tải dữ liệu... ${fmtMB(received)} — đừng bấm lại nút`;
-              show("info", txt);
-            }
-          }
-          // gộp toàn bộ chunks -> string
-          const all = new Uint8Array(received);
-          let off = 0;
-          for(const c of chunks){ all.set(c, off); off += c.length; }
-          const text = dec.decode(all);
-          if(!text || !text.trim())
-            throw new Error("Phản hồi rỗng dù HTTP 200. Mạng có thể đã ngắt giữa chừng. Thử lại sau ít giây.");
-          try{ return JSON.parse(text); }
-          catch(e){ throw new Error("Phản hồi không phải JSON. 200 ký tự đầu: "+text.slice(0,200)); }
+          try{ return JSON.parse(txt); }
+          catch(e){ throw new Error(`[${label}] Không phải JSON. 200 ký tự đầu: ${txt.slice(0,200)}`); }
         }
 
-        console.log("[load] URL:", metaUrl.length, "ký tự");
-        show("info",'<span class="spin"></span>Đang kết nối với Google Sheets... (sheet to có thể mất 15-30 giây, vui lòng KHÔNG bấm lại nút)');
-        const data = await fetchStream(metaUrl);
-        const tabs=(data.sheets||[]).map(s=>s.properties.title);
+        // ===== BƯỚC 1: lấy danh sách tab =====
+        show("info",'<span class="spin"></span>Đang lấy danh sách tab của sheet...');
+        const listUrl = `https://sheets.googleapis.com/v4/spreadsheets/${id}`+
+                        `?fields=properties(title),sheets(properties(title,sheetId))&key=${key}`;
+        console.log("[load] Bước 1 URL:", listUrl.length, "ký tự");
+        const listData = await fetchJson(listUrl, "list-tabs");
 
-        // chỉ giữ tab dạng "T<số> SHOPEE" / "T<số> ZALO"
-        const valid=[];
-        let huyDoiTab=null; // tab đặc biệt "HỦY/ĐỔI"
-        (data.sheets||[]).forEach(s=>{
-          const title=s.properties.title;
-          const mt=title.match(/^\s*T\s*(\d{1,2})\s+(SHOPEE|ZALO)\s*$/i);
-          if(mt) valid.push({title, month:+mt[1], kind:mt[2].toUpperCase(), raw:s});
-          // nhận tab HỦY/ĐỔI: tên chứa cả "hủy" lẫn "đổi" (hoặc tên chứa emoji ⭕)
-          else if(/h[ủu]y/i.test(title) && /[đd][ổo]i/i.test(title)){
-            huyDoiTab={title, raw:s};
+        const tabs = (listData.sheets||[]).map(s=>s.properties.title);
+        // Lọc các tab cần đọc
+        const toRead = []; // {title, month?, kind?, sheetId, isHuyDoi}
+        (listData.sheets||[]).forEach(s=>{
+          const title = s.properties.title;
+          const sId   = s.properties.sheetId;
+          const mt = title.match(/^\s*T\s*(\d{1,2})\s+(SHOPEE|ZALO)\s*$/i);
+          if(mt){
+            toRead.push({title, sheetId:sId, month:+mt[1], kind:mt[2].toUpperCase(), isHuyDoi:false});
+          } else if(/h[ủu]y/i.test(title) && /[đd][ổo]i/i.test(title)){
+            toRead.push({title, sheetId:sId, isHuyDoi:true});
           }
         });
 
-        if(!valid.length){
+        if(!toRead.some(t=>!t.isHuyDoi)){
           show("err","Không tìm thấy tab nào dạng <code>T5 SHOPEE</code> / <code>T5 ZALO</code>. "+
             "Các tab đọc được: "+tabs.map(t=>"<code>"+t+"</code>").join(", "));
           btn.disabled=false; return;
         }
+
+        // ===== BƯỚC 2: lấy data cho từng tab (chạy song song, giới hạn ~6) =====
+        // Mỗi tab 1 call lấy đầy đủ: rowData (values+format) + merges, dùng `ranges=`
+        // để Google chỉ trả data tab đó. Vì URL có ký tự đặc biệt -> phải encode.
+        async function fetchTabData(t, idx){
+          // ranges = "'<title>'"  (apostrophe escape nếu title có dấu nháy)
+          const safeTitle = t.title.replace(/'/g, "''");
+          const rangeParam = `'${safeTitle}'`;
+          const u = `https://sheets.googleapis.com/v4/spreadsheets/${id}`+
+                    `?ranges=${encodeURIComponent(rangeParam)}`+
+                    `&fields=sheets(properties(sheetId),merges,`+
+                    `data(rowData(values(formattedValue,effectiveFormat(backgroundColor,`+
+                    `textFormat(strikethrough)),textFormatRuns(startIndex,format(strikethrough))))))`+
+                    `&includeGridData=true&key=${key}`;
+          const d = await fetchJson(u, `tab#${idx}:${t.title}`);
+          // chỉ có 1 sheet trong response (vì ranges chỉ định 1 tab)
+          const s = (d.sheets||[])[0];
+          if(!s) throw new Error(`Không có dữ liệu cho tab "${t.title}"`);
+          t.raw = s;
+          return t;
+        }
+
+        // chạy song song với giới hạn concurrency để tránh quá tải
+        const CONC = 4;
+        let doneCnt = 0;
+        const total = toRead.length;
+        const updateProg = ()=> show("info",
+          `<span class="spin"></span>Đang tải ${doneCnt}/${total} tab... (chia nhỏ để tránh tràn dữ liệu)`);
+        updateProg();
+
+        const queue = toRead.slice();
+        async function worker(){
+          while(queue.length){
+            const t = queue.shift();
+            const idx = toRead.indexOf(t)+1;
+            await fetchTabData(t, idx);
+            doneCnt++;
+            updateProg();
+          }
+        }
+        await Promise.all(Array.from({length:Math.min(CONC,total)}, ()=>worker()));
+
+        // ===== Lắp lại đúng format `data` như trước, để code phía sau dùng nguyên =====
+        const valid = toRead.filter(t=>!t.isHuyDoi).map(t=>({
+          title:t.title, month:t.month, kind:t.kind, raw:t.raw
+        }));
+        const huyDoiTab = toRead.find(t=>t.isHuyDoi) ? (() => {
+          const h = toRead.find(t=>t.isHuyDoi);
+          return {title:h.title, raw:h.raw};
+        })() : null;
+        const data = { properties:{ title: listData.properties?.title || "" } };
 
         // dựng values + grid TỪ CHÍNH metadata (đã có formattedValue) — không cần gọi values riêng
         for(const v of valid){
@@ -1760,7 +1776,24 @@ try{
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.8.5</b> — (bản hiện tại)
+<b>v1.9.0</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li><b>Đại tu cách tải dữ liệu từ Google Sheets</b> để không còn lỗi "Phản hồi rỗng"
+      với sheet to:
+      <ul style="margin:4px 0">
+        <li>Trước: gửi <b>1 request to (~7 MB)</b> lấy toàn bộ spreadsheet → hay
+            bị timeout/cancel ở Vietnam, mạng chập chờn → body rỗng.</li>
+        <li>Giờ: <b>chia làm nhiều request nhỏ</b> chạy song song (4 cùng lúc):
+            1 request siêu nhẹ lấy danh sách tab, rồi mỗi tab cần đọc là 1 request
+            riêng lấy data. Mỗi request chỉ vài trăm KB → ổn định hơn nhiều.</li>
+        <li>Hiện tiến trình "Đang tải 3/12 tab..." rõ ràng.</li>
+        <li>Bỏ qua tab rác (không phải <code>T# SHOPEE/ZALO</code> hay HỦY/ĐỔI)
+            → không lãng phí băng thông.</li>
+      </ul>
+  </li>
+  <li>Console log thời gian và dung lượng từng request để dễ debug nếu vẫn lỗi.</li>
+</ul>
+<b>v1.8.5</b>
 <ul style="margin:4px 0 10px">
   <li><b>Sửa triệt để lỗi "phản hồi rỗng" với sheet to.</b> Nguyên nhân thật:
       response từ Google ~7 MB, mất 15–30 giây ở phía server. Người dùng tưởng web
