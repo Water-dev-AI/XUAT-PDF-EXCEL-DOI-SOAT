@@ -7,7 +7,7 @@
    >>> XEM CHANGELOG & PROMPT BÀN GIAO ĐẦY ĐỦ Ở CUỐI FILE index.html <<<
    ========================================================================= */
 
-const APP_VERSION = "1.8.2";
+const APP_VERSION = "1.8.3";
 
 const App = (() => {
   "use strict";
@@ -198,10 +198,31 @@ const App = (() => {
           `&includeGridData=true&key=${key}`;
         const res=await fetch(metaUrl);
         if(!res.ok){
-          const e=await res.json().catch(()=>({}));
-          throw new Error(e.error?.message||("HTTP "+res.status));
+          // thử parse error JSON; nếu không parse được, dùng text
+          let errMsg = "HTTP "+res.status;
+          try{
+            const e=await res.json();
+            if(e && e.error && e.error.message) errMsg = e.error.message;
+          }catch(_){
+            try{ const t=await res.text(); if(t) errMsg += " — "+t.slice(0,200); }catch(__){}
+          }
+          throw new Error(errMsg);
         }
-        const data=await res.json();
+        // parse JSON kèm chẩn đoán nếu body rỗng / không phải JSON
+        let data;
+        try{
+          const txt = await res.text();
+          if(!txt || !txt.trim()){
+            throw new Error("Google Sheets API trả về dữ liệu rỗng (HTTP "+res.status+"). "+
+              "Có thể do mạng/proxy chặn hoặc tường lửa. Thử mở lại trang và kiểm tra kết nối.");
+          }
+          try{
+            data = JSON.parse(txt);
+          }catch(parseErr){
+            throw new Error("Không đọc được dữ liệu từ Google (không phải JSON). "+
+              "Có thể do mạng/proxy chèn trang chặn. 200 ký tự đầu: "+txt.slice(0,200));
+          }
+        }catch(e){ throw e; }
         const tabs=(data.sheets||[]).map(s=>s.properties.title);
 
         // chỉ giữ tab dạng "T<số> SHOPEE" / "T<số> ZALO"
@@ -1700,7 +1721,15 @@ try{
    Mỗi lần sửa: tăng APP_VERSION (đầu file) và thêm 1 mục ở ĐẦU danh sách.
    ========================================================================= */
 const CHANGELOG_HTML = `
-<b>v1.8.2</b> — (bản hiện tại)
+<b>v1.8.3</b> — (bản hiện tại)
+<ul style="margin:4px 0 10px">
+  <li>Thông báo lỗi rõ hơn khi gọi Google Sheets API gặp sự cố mạng (trước đây
+      hiện chung chung "Unexpected end of JSON input"). Giờ tách rõ:
+      response rỗng, response không phải JSON, hay HTTP error — và in 200 ký tự
+      đầu của phản hồi nếu lạ. Giúp xác định đúng nguyên nhân: mạng/proxy chặn,
+      API key sai quyền, hay sheet chưa public.</li>
+</ul>
+<b>v1.8.2</b>
 <ul style="margin:4px 0 10px">
   <li>Sửa lỗi <b>chữ dòng VAT bị chồng lên nhau</b> trong Excel khi nội dung MST/Tên/
       Đ/c/Email dài (đặc biệt khách doanh nghiệp). Giờ tự tính chiều cao dòng VAT
